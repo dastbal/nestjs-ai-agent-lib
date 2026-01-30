@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "module": "CommonJS",
+    "target": "ES2021",
+    "lib": ["ES2021"],
+    "declaration": true,            /* Genera los .d.ts para que otros vean tus tipos */
+    "outDir": "./dist",             /* Dónde se guardará el código listo para publicar */
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "experimentalDecorators": true, /* Necesario para NestJS */
+    "emitDecoratorMetadata": true,  /* Necesario para NestJS */
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "node",
+    "types": ["node"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts"]
+}

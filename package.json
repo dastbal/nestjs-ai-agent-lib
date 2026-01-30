@@ -1,0 +1,46 @@
+{
+  "name": "@dastbal/nestjs-ai-agent",
+  "version": "1.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "Autonomous AI Agent for NestJS - Principal Software Engineer Level",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "gen": "./dist/bin/cli.js"
+  },
+ "scripts": {
+  "build": "tsc",
+  "gen": "ts-node src/bin/cli.ts",
+  "start:dev": "ts-node src/bin/cli.ts",
+  "prepublishOnly": "npm run build"
+},
+  "dependencies": {
+    "@langchain/google-vertexai": "^2.1.6",
+    "@langchain/langgraph": "1.0.7",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.0.0",
+    "better-sqlite3": "^12.5.0",
+    "chalk": "^4.1.2",
+    "commander": "^14.0.2",
+    "deepagents": "^1.6.1",
+    "dotenv": "^17.2.3",
+    "langchain": "^1.2.7",
+    "sqlite3": "^5.1.7",
+    "ts-morph": "^27.0.2",
+    "uuid": "^13.0.0",
+    "zod": "^4.3.5"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^10.0.0",
+    "reflect-metadata": "^0.1.13"
+  },
+  "devDependencies": {
+    "@nestjs/common": "^10.4.22",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.19.30",
+    "@types/uuid": "^10.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.0.0"
+  }
+}

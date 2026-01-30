@@ -1,0 +1,27 @@
+# --- Dependencias ---
+node_modules/
+
+# --- Compilación (Código generado) ---
+# Ignoramos la carpeta de salida porque se genera con 'npm run build'
+dist/
+
+# --- Persistencia y Estado del Agente ---
+# No queremos subir tu base de datos local ni tus memorias
+.agent/
+history.db
+history.db-journal
+/memories/
+
+# --- Seguridad y Privacidad ---
+# Bloqueamos el archivo de variables donde están tus credenciales de Google
+.env
+*.json
+# Pero permitimos que se suban los archivos de configuración esenciales
+!package.json
+!package-lock.json
+!tsconfig.json
+
+# --- Logs y Temporales ---
+npm-debug.log*
+yarn-debug.log*
+.DS_Store
