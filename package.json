@@ -1,21 +1,27 @@
 {
   "name": "@dastbal/nestjs-ai-agent",
-  "version": "1.0.0",
-  "publishConfig": {
-    "access": "public"
-  },
-  "description": "Autonomous AI Agent for NestJS - Principal Software Engineer Level",
+  "version": "1.0.1",
+  "description": "Autonomous AI Agent for NestJS - Principal Software Engineer Level with RAG and SQLite persistence",
+  "author": "David Balladares",
+  "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "gen": "./dist/bin/cli.js"
+    "gen": "dist/bin/cli.js"
   },
- "scripts": {
-  "build": "tsc",
-  "gen": "ts-node src/bin/cli.ts",
-  "start:dev": "ts-node src/bin/cli.ts",
-  "prepublishOnly": "npm run build"
-},
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "gen": "ts-node src/bin/cli.ts",
+    "start:dev": "ts-node src/bin/cli.ts",
+    "prepublishOnly": "npm run build"
+  },
   "dependencies": {
     "@langchain/google-vertexai": "^2.1.6",
     "@langchain/langgraph": "1.0.7",
@@ -32,8 +38,8 @@
     "zod": "^4.3.5"
   },
   "peerDependencies": {
-    "@nestjs/common": "^10.0.0",
-    "reflect-metadata": "^0.1.13"
+  "@nestjs/common": "^10.0.0 || ^11.0.0",
+  "reflect-metadata": "^0.1.13 || ^0.2.0"
   },
   "devDependencies": {
     "@nestjs/common": "^10.4.22",

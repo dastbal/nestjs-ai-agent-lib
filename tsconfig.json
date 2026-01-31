@@ -15,6 +15,6 @@
     "moduleResolution": "node",
     "types": ["node"]
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*" ,".agent/**/*"],
   "exclude": ["node_modules", "dist", "**/*.spec.ts"]
 }
