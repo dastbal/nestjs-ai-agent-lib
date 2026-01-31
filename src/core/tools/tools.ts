@@ -7,49 +7,96 @@ import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
 import { IndexerService } from '../rag/indexer';
+
 const execAsync = promisify(exec);
+
 const log = {
   ai: (msg: string) => console.log(chalk.blue('🤖 [AI]: ') + msg),
   tool: (msg: string) => console.log(chalk.yellow('🛠️  [TOOL]: ') + msg),
   sys: (msg: string) => console.log(chalk.gray('⚙️  [SYS]: ') + msg),
   error: (msg: string) => console.log(chalk.red('❌ [ERR]: ') + msg),
+  debug: (msg: string) => console.log(chalk.magenta('🐛 [DEBUG]: ') + msg), // Added for debugging
 };
+
 /**
- * 💾 Genera un backup antes de modificar un archivo real.
+ * Creates a backup of a file before it is modified.
+ * The backup is stored in the .agent/backups directory with a timestamp.
+ * @param {string} filePath - The relative path of the file to back up.
  */
 const createBackup = (filePath: string) => {
+  log.debug(`Starting backup process for file: ${filePath}`);
   const rootDir = process.cwd();
   const backupDir = path.join(rootDir, '.agent', 'backups');
-  if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+  log.debug(`Backup directory resolved to: ${backupDir}`);
+
+  if (!fs.existsSync(backupDir)) {
+    log.debug(`Backup directory does not exist. Creating: ${backupDir}`);
+    fs.mkdirSync(backupDir, { recursive: true });
+  }
 
   const realPath = path.resolve(rootDir, filePath);
+  log.debug(`Resolved real path for backup: ${realPath}`);
+
   if (fs.existsSync(realPath)) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = path.basename(realPath);
     const backupPath = path.join(backupDir, `${timestamp}_${filename}.bak`);
+    log.debug(`Attempting to copy ${realPath} to ${backupPath}`);
     fs.copyFileSync(realPath, backupPath);
+    log.sys(`Backup created for ${filePath} at ${backupPath}`);
+  } else {
+    log.debug(`File does not exist, no backup needed: ${realPath}`);
   }
 };
 
+/**
+ * Tool for safely writing content to a file on the real disk.
+ * It creates a backup before writing and then triggers a project re-indexing.
+ * @param {object} params - The parameters for the tool.
+ * @param {string} params.filePath - The relative path where the file should be saved.
+ * @param {string} params.content - The content to write to the file.
+ * @returns {Promise<string>} A message indicating success or failure.
+ */
 export const safeWriteFileTool = tool(
   async ({ filePath, content }) => {
+    log.debug(`safe_write_file called with filePath: ${filePath}`);
     try {
       const rootDir = process.cwd();
+      log.debug(`Current working directory: ${rootDir}`);
       const targetPath = path.resolve(rootDir, filePath);
-      if (!targetPath.startsWith(rootDir)) return '❌ Error: Access denied.';
+      log.debug(`Resolved target path: ${targetPath}`);
+
+      // Security check: Ensure the path is within the project root
+      if (!targetPath.startsWith(rootDir)) {
+        log.error(`Attempted write outside root directory: ${filePath}. Resolved path: ${targetPath}`);
+        return '❌ Error: Access denied. Cannot write outside the project root.';
+      }
 
       const dir = path.dirname(targetPath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      log.debug(`Directory for target path: ${dir}`);
+      if (!fs.existsSync(dir)) {
+        log.debug(`Directory does not exist. Creating: ${dir}`);
+        fs.mkdirSync(dir, { recursive: true });
+        log.sys(`Created directory: ${dir}`);
+      }
 
-      createBackup(filePath); // Tu lógica de backup
+      createBackup(filePath); // Create backup before writing
+      log.debug(`Writing content to file: ${targetPath}`);
       fs.writeFileSync(targetPath, content, 'utf-8');
-      log.sys(`Indexando cambio en: ${filePath}`);
+      log.sys(`File saved to REAL DISK: ${filePath}`);
+
+      // Trigger re-indexing after a successful write
+      log.sys(`Initiating re-index for: ${filePath}`);
       const indexer = new IndexerService();
-      indexer.indexProject().catch((err) => log.error(` ${err.message}`));
+      // Run indexing asynchronously, log errors but don't block the write confirmation
+      indexer.indexProject().catch((err) => {
+        log.error(`Failed to re-index after write for ${filePath}: ${err.message}`);
+      });
 
       return `✅ File saved to REAL DISK: ${filePath}`;
     } catch (error: any) {
-      return `❌ Error: ${error.message}`;
+      log.error(`Failed to write file ${filePath}: ${error.message}`);
+      return `❌ Error writing file: ${error.message}`;
     }
   },
   {
@@ -63,16 +110,38 @@ export const safeWriteFileTool = tool(
   },
 );
 
-// --- TOOL 2: READ FILE (Manual) ---
+/**
+ * Tool for safely reading the content of a file from the real disk.
+ * @param {object} params - The parameters for the tool.
+ * @param {string} params.filePath - The relative path of the file to read.
+ * @returns {Promise<string>} The content of the file, or an error message if reading fails.
+ */
 export const safeReadFileTool = tool(
   async ({ filePath }) => {
+    log.debug(`safe_read_file called with filePath: ${filePath}`);
     try {
       const rootDir = process.cwd();
+      log.debug(`Current working directory: ${rootDir}`);
       const targetPath = path.resolve(rootDir, filePath);
-      if (!fs.existsSync(targetPath)) return '❌ File not found.';
-      return fs.readFileSync(targetPath, 'utf-8');
+      log.debug(`Resolved target path: ${targetPath}`);
+
+      // Security check: Ensure the path is within the project root
+      if (!fs.existsSync(targetPath)) {
+        log.error(`File not found for reading: ${filePath}. Resolved path: ${targetPath}`);
+        return `❌ File not found: ${filePath}`;
+      }
+      if (!targetPath.startsWith(rootDir)) {
+        log.error(`Attempted read outside root directory: ${filePath}. Resolved path: ${targetPath}`);
+        return '❌ Error: Access denied. Cannot read outside the project root.';
+      }
+
+      log.debug(`Reading file content from: ${targetPath}`);
+      const content = fs.readFileSync(targetPath, 'utf-8');
+      log.sys(`File read successfully: ${filePath}`);
+      return content;
     } catch (e: any) {
-      return `Error: ${e.message}`;
+      log.error(`Failed to read file ${filePath}: ${e.message}`);
+      return `❌ Error reading file: ${e.message}`;
     }
   },
   {
@@ -81,19 +150,29 @@ export const safeReadFileTool = tool(
     schema: z.object({ filePath: z.string() }),
   },
 );
+
 /**
- * 🔍 TOOL: Ask Codebase (Semantic & Graph Search)
- * This is the Agent's "Eyes". It retrieves code + context.
+ * Tool to query the codebase using semantic search and dependency graph analysis.
+ * It's the primary way for the agent to explore and understand the project structure and logic.
+ * @param {object} params - The parameters for the tool.
+ * @param {string} params.query - A natural language query describing the code or functionality to find.
+ * @returns {Promise<string>} A report containing relevant code snippets, file paths, and dependencies.
  */
 export const askCodebaseTool = tool(
   async ({ query }) => {
+    log.debug(`ask_codebase called with query: "${query}"`);
     try {
-      // We assume the streaming UI handles the 'Thinking...' log via the framework events
+      log.tool(`Querying codebase: "${query}"`);
       const retriever = new RetrieverService();
+      log.debug('RetrieverService instantiated.');
       const context = await retriever.getContextForLLM(query);
+      log.tool(`Codebase query complete for: "${query}"`);
+      log.debug(`Context retrieved for query "${query}".`);
       return context;
     } catch (error) {
-      return `❌ Error querying codebase: ${error}`;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      log.error(`Error during codebase query "${query}": ${errorMessage}`);
+      return `❌ Error querying codebase: ${errorMessage}`;
     }
   },
   {
@@ -115,20 +194,32 @@ export const askCodebaseTool = tool(
 );
 
 /**
- * ✅ TOOL: Integrity Check (Compiler)
- * Validates the project state using TypeScript compiler.
+ * Tool to run the TypeScript compiler (tsc) for type checking.
+ * This is crucial for maintaining code quality and catching errors early.
+ * @returns {Promise<string>} A message indicating whether the integrity check passed or failed, including compiler output on failure.
  */
 export const integrityCheckTool = tool(
   async () => {
+    const rootDir = process.cwd();
+    log.tool('Running TypeScript integrity check...');
+    log.debug(`Integrity check running in directory: ${rootDir}`);
     try {
-      const rootDir = process.cwd();
-      // 'tsc --noEmit' checks types without generating JS files. Fast and safe.
-      const { stdout } = await execAsync('npx tsc --noEmit', { cwd: rootDir });
-      console.log('INTEGRITY CHECK PASSED.', rootDir, stdout);
+      // 'tsc --noEmit' checks types without generating JS files. It's fast and safe.
+      log.debug('Executing command: npx tsc --noEmit');
+      const { stdout, stderr } = await execAsync('npx tsc --noEmit', { cwd: rootDir });
+      if (stderr) {
+        // Log stderr as an error even if stdout indicates success, as tsc might output warnings here
+        log.error(`TypeScript integrity check produced stderr output:\n${stderr}`);
+      }
+      log.tool('TypeScript integrity check PASSED.');
+      log.debug(`Integrity check stdout:\n${stdout}`);
+      // Include stdout in the success message for completeness, though it's usually empty on success.
       return `✅ INTEGRITY CHECK PASSED. The codebase is strictly typed and compiles correctly.\n${stdout}`;
     } catch (error: any) {
-      // Return the exact compiler error so the agent can fix it
-      return `❌ INTEGRITY CHECK FAILED. You must fix these TypeScript errors before finishing:\n${error.stdout || error.message}`;
+      // Return the exact compiler error output so the agent can attempt to fix it
+      const errorMessage = error.stdout || error.stderr || error.message || 'Unknown error';
+      log.error(`TypeScript integrity check FAILED.\n${errorMessage}`);
+      return `❌ INTEGRITY CHECK FAILED. You must fix these TypeScript errors before finishing:\n${errorMessage}`;
     }
   },
   {
@@ -141,35 +232,36 @@ export const integrityCheckTool = tool(
 );
 
 /**
- * Maintenance tool to update the vector knowledge base.
- * * This tool forces a re-read and vectorization of the project files.
- * It is useful for ensuring the LLM has access to the most recent code changes
- * that may not have been synchronized automatically.
- * * @returns {Promise<string>} A confirmation message or error details.
+ * Tool to refresh the project's index, forcing a re-scan and re-vectorization of all files.
+ * This is useful when the agent needs to be absolutely sure it's working with the latest code,
+ * especially after significant changes or if the automatic indexing seems to be lagging.
+ * @returns {Promise<string>} A confirmation message or details about any errors encountered during indexing.
  */
 export const refreshIndexTool = tool(
   async () => {
     log.sys('🔄 Starting full project re-indexing...');
 
     try {
-      // Start the expensive operation
       const indexer = new IndexerService();
-      indexer.indexProject().catch((err) => log.error(` ${err.message}`));
+      log.debug('IndexerService instantiated.');
+      // Execute the indexing process.
+      await indexer.indexProject(); // Await the completion of the indexing process
 
       log.sys('✅ Re-indexing completed successfully.');
+      log.debug('Project re-indexing process finished.');
       return '✅ Index successfully updated. I now have access to the latest code version.';
     } catch (error) {
-      // Safe error handling in TypeScript
+      // Provide a detailed error message if indexing fails.
       const errorMessage =
         error instanceof Error ? error.message : String(error);
 
       log.error(`❌ Indexing failed: ${errorMessage}`);
+      log.debug(`Error details during indexing: ${errorMessage}`);
       return `❌ Critical error while attempting to index the project: ${errorMessage}. Please try again or check the logs.`;
     }
   },
   {
     name: 'refresh_project_index',
-    // CRITICAL IMPROVEMENT: Instruction-oriented description for the LLM
     description:
       'Triggers a forced, full re-indexing of the project codebase. That fucntion is optimazed only index changes comparing hash' +
       'USE THIS TOOL ONLY WHEN: ' +

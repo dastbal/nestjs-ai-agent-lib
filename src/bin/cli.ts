@@ -28,14 +28,14 @@ program
       log.sys("Inicializando Agente en modo CLI...");
 
       // El threadId puede ser fijo para sesiones de CLI o dinámico
-      const threadId = "cli-user-session";
+      const threadId = "cli-user";
       const agent = await AgentFactory.create(threadId);
 
       log.ai(`Procesando: "${instruction}"`);
 
       const response = await agent.invoke(
         { messages: [{ role: "user", content: instruction }] },
-        { configurable: { thread_id: threadId } },
+        { configurable: { thread_id: threadId }, recursionLimit: 50 },
       );
 
       const lastMessage = response.messages[response.messages.length - 1];
