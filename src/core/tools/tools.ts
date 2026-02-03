@@ -1,21 +1,21 @@
-import { tool } from '@langchain/core/tools';
-import { z } from 'zod';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import { RetrieverService } from '../rag/retriever';
-import * as fs from 'fs';
-import * as path from 'path';
-import chalk from 'chalk';
-import { IndexerService } from '../rag/indexer';
+import { tool } from "@langchain/core/tools";
+import { z } from "zod";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { RetrieverService } from "../rag/retriever";
+import * as fs from "fs";
+import * as path from "path";
+import chalk from "chalk";
+import { IndexerService } from "../rag/indexer";
 
 const execAsync = promisify(exec);
 
 const log = {
-  ai: (msg: string) => console.log(chalk.blue('🤖 [AI]: ') + msg),
-  tool: (msg: string) => console.log(chalk.yellow('🛠️  [TOOL]: ') + msg),
-  sys: (msg: string) => console.log(chalk.gray('⚙️  [SYS]: ') + msg),
-  error: (msg: string) => console.log(chalk.red('❌ [ERR]: ') + msg),
-  debug: (msg: string) => console.log(chalk.magenta('🐛 [DEBUG]: ') + msg), // Added for debugging
+  ai: (msg: string) => console.log(chalk.blue("🤖 [AI]: ") + msg),
+  tool: (msg: string) => console.log(chalk.yellow("🛠️  [TOOL]: ") + msg),
+  sys: (msg: string) => console.log(chalk.gray("⚙️  [SYS]: ") + msg),
+  error: (msg: string) => console.log(chalk.red("❌ [ERR]: ") + msg),
+  debug: (msg: string) => console.log(chalk.magenta("🐛 [DEBUG]: ") + msg), // Added for debugging
 };
 
 /**
@@ -26,7 +26,7 @@ const log = {
 const createBackup = (filePath: string) => {
   log.debug(`Starting backup process for file: ${filePath}`);
   const rootDir = process.cwd();
-  const backupDir = path.join(rootDir, '.agent', 'backups');
+  const backupDir = path.join(rootDir, ".agent", "backups");
   log.debug(`Backup directory resolved to: ${backupDir}`);
 
   if (!fs.existsSync(backupDir)) {
@@ -38,7 +38,7 @@ const createBackup = (filePath: string) => {
   log.debug(`Resolved real path for backup: ${realPath}`);
 
   if (fs.existsSync(realPath)) {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const filename = path.basename(realPath);
     const backupPath = path.join(backupDir, `${timestamp}_${filename}.bak`);
     log.debug(`Attempting to copy ${realPath} to ${backupPath}`);
@@ -68,8 +68,10 @@ export const safeWriteFileTool = tool(
 
       // Security check: Ensure the path is within the project root
       if (!targetPath.startsWith(rootDir)) {
-        log.error(`Attempted write outside root directory: ${filePath}. Resolved path: ${targetPath}`);
-        return '❌ Error: Access denied. Cannot write outside the project root.';
+        log.error(
+          `Attempted write outside root directory: ${filePath}. Resolved path: ${targetPath}`,
+        );
+        return "❌ Error: Access denied. Cannot write outside the project root.";
       }
 
       const dir = path.dirname(targetPath);
@@ -82,7 +84,7 @@ export const safeWriteFileTool = tool(
 
       createBackup(filePath); // Create backup before writing
       log.debug(`Writing content to file: ${targetPath}`);
-      fs.writeFileSync(targetPath, content, 'utf-8');
+      fs.writeFileSync(targetPath, content, "utf-8");
       log.sys(`File saved to REAL DISK: ${filePath}`);
 
       // Trigger re-indexing after a successful write
@@ -90,7 +92,9 @@ export const safeWriteFileTool = tool(
       const indexer = new IndexerService();
       // Run indexing asynchronously, log errors but don't block the write confirmation
       indexer.indexProject().catch((err) => {
-        log.error(`Failed to re-index after write for ${filePath}: ${err.message}`);
+        log.error(
+          `Failed to re-index after write for ${filePath}: ${err.message}`,
+        );
       });
 
       return `✅ File saved to REAL DISK: ${filePath}`;
@@ -100,12 +104,12 @@ export const safeWriteFileTool = tool(
     }
   },
   {
-    name: 'safe_write_file',
+    name: "safe_write_file",
     description:
-      'WRITES code to the REAL local disk. Creates a backup automatically.',
+      "WRITES code to the REAL local disk. Creates a backup automatically.",
     schema: z.object({
-      filePath: z.string().describe('Relative path (e.g., src/app.service.ts)'),
-      content: z.string().describe('Full file content'),
+      filePath: z.string().describe("Relative path (e.g., src/app.service.ts)"),
+      content: z.string().describe("Full file content"),
     }),
   },
 );
@@ -127,16 +131,20 @@ export const safeReadFileTool = tool(
 
       // Security check: Ensure the path is within the project root
       if (!fs.existsSync(targetPath)) {
-        log.error(`File not found for reading: ${filePath}. Resolved path: ${targetPath}`);
+        log.error(
+          `File not found for reading: ${filePath}. Resolved path: ${targetPath}`,
+        );
         return `❌ File not found: ${filePath}`;
       }
       if (!targetPath.startsWith(rootDir)) {
-        log.error(`Attempted read outside root directory: ${filePath}. Resolved path: ${targetPath}`);
-        return '❌ Error: Access denied. Cannot read outside the project root.';
+        log.error(
+          `Attempted read outside root directory: ${filePath}. Resolved path: ${targetPath}`,
+        );
+        return "❌ Error: Access denied. Cannot read outside the project root.";
       }
 
       log.debug(`Reading file content from: ${targetPath}`);
-      const content = fs.readFileSync(targetPath, 'utf-8');
+      const content = fs.readFileSync(targetPath, "utf-8");
       log.sys(`File read successfully: ${filePath}`);
       return content;
     } catch (e: any) {
@@ -145,8 +153,8 @@ export const safeReadFileTool = tool(
     }
   },
   {
-    name: 'safe_read_file',
-    description: 'READS code from the REAL local disk.',
+    name: "safe_read_file",
+    description: "READS code from the REAL local disk.",
     schema: z.object({ filePath: z.string() }),
   },
 );
@@ -164,24 +172,25 @@ export const askCodebaseTool = tool(
     try {
       log.tool(`Querying codebase: "${query}"`);
       const retriever = new RetrieverService();
-      log.debug('RetrieverService instantiated.');
+      log.debug("RetrieverService instantiated.");
       const context = await retriever.getContextForLLM(query);
       log.tool(`Codebase query complete for: "${query}"`);
       log.debug(`Context retrieved for query "${query}".`);
       return context;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       log.error(`Error during codebase query "${query}": ${errorMessage}`);
       return `❌ Error querying codebase: ${errorMessage}`;
     }
   },
   {
-    name: 'ask_codebase',
+    name: "ask_codebase",
     description:
-      'CRITICAL TOOL. Use this tool FIRST to explore the codebase. ' +
-      'It performs a semantic search AND a dependency graph lookup. ' +
-      'Returns: Relevant code snippets, lists of dependencies (imports), and ACCURATE FILE PATHS. ' +
-      'Strategy: Use this to find *where* logic is located. If you need the full file content to edit it safely, ' +
+      "CRITICAL TOOL. Use this tool FIRST to explore the codebase. " +
+      "It performs a semantic search AND a dependency graph lookup. " +
+      "Returns: Relevant code snippets, lists of dependencies (imports), and ACCURATE FILE PATHS. " +
+      "Strategy: Use this to find *where* logic is located. If you need the full file content to edit it safely, " +
       "copy the 'FILE PATH' returned by this tool and use the native 'read_file' tool.",
     schema: z.object({
       query: z
@@ -201,31 +210,36 @@ export const askCodebaseTool = tool(
 export const integrityCheckTool = tool(
   async () => {
     const rootDir = process.cwd();
-    log.tool('Running TypeScript integrity check...');
+    log.tool("Running TypeScript integrity check...");
     log.debug(`Integrity check running in directory: ${rootDir}`);
     try {
       // 'tsc --noEmit' checks types without generating JS files. It's fast and safe.
-      log.debug('Executing command: npx tsc --noEmit');
-      const { stdout, stderr } = await execAsync('npx tsc --noEmit', { cwd: rootDir });
+      log.debug("Executing command: npx tsc --noEmit");
+      const { stdout, stderr } = await execAsync("npx tsc --noEmit", {
+        cwd: rootDir,
+      });
       if (stderr) {
         // Log stderr as an error even if stdout indicates success, as tsc might output warnings here
-        log.error(`TypeScript integrity check produced stderr output:\n${stderr}`);
+        log.error(
+          `TypeScript integrity check produced stderr output:\n${stderr}`,
+        );
       }
-      log.tool('TypeScript integrity check PASSED.');
+      log.tool("TypeScript integrity check PASSED.");
       log.debug(`Integrity check stdout:\n${stdout}`);
       // Include stdout in the success message for completeness, though it's usually empty on success.
       return `✅ INTEGRITY CHECK PASSED. The codebase is strictly typed and compiles correctly.\n${stdout}`;
     } catch (error: any) {
       // Return the exact compiler error output so the agent can attempt to fix it
-      const errorMessage = error.stdout || error.stderr || error.message || 'Unknown error';
+      const errorMessage =
+        error.stdout || error.stderr || error.message || "Unknown error";
       log.error(`TypeScript integrity check FAILED.\n${errorMessage}`);
       return `❌ INTEGRITY CHECK FAILED. You must fix these TypeScript errors before finishing:\n${errorMessage}`;
     }
   },
   {
-    name: 'run_integrity_check',
+    name: "run_integrity_check",
     description:
-      'Runs the TypeScript compiler (tsc) to verify type safety. ' +
+      "Runs the TypeScript compiler (tsc) to verify type safety. " +
       "MANDATORY: Run this tool after every 'write_file' or 'edit_file' operation to ensure you haven't broken the build.",
     schema: z.object({}),
   },
@@ -239,17 +253,17 @@ export const integrityCheckTool = tool(
  */
 export const refreshIndexTool = tool(
   async () => {
-    log.sys('🔄 Starting full project re-indexing...');
+    log.sys("🔄 Starting full project re-indexing...");
 
     try {
       const indexer = new IndexerService();
-      log.debug('IndexerService instantiated.');
+      log.debug("IndexerService instantiated.");
       // Execute the indexing process.
       await indexer.indexProject(); // Await the completion of the indexing process
 
-      log.sys('✅ Re-indexing completed successfully.');
-      log.debug('Project re-indexing process finished.');
-      return '✅ Index successfully updated. I now have access to the latest code version.';
+      log.sys("✅ Re-indexing completed successfully.");
+      log.debug("Project re-indexing process finished.");
+      return "✅ Index successfully updated. I now have access to the latest code version.";
     } catch (error) {
       // Provide a detailed error message if indexing fails.
       const errorMessage =
@@ -261,13 +275,88 @@ export const refreshIndexTool = tool(
     }
   },
   {
-    name: 'refresh_project_index',
+    name: "refresh_project_index",
     description:
-      'Triggers a forced, full re-indexing of the project codebase. That fucntion is optimazed only index changes comparing hash' +
-      'USE THIS TOOL ONLY WHEN: ' +
-      '1) The user explicitly states that files have changed. ' +
-      '2) You cannot find information that should be present (stale context). ' +
-      'Note: This is a computationally expensive operation; inform the user before running it.',
+      "Triggers a forced, full re-indexing of the project codebase. That fucntion is optimazed only index changes comparing hash" +
+      "USE THIS TOOL ONLY WHEN: " +
+      "1) The user explicitly states that files have changed. " +
+      "2) You cannot find information that should be present (stale context). " +
+      "Note: This is a computationally expensive operation; inform the user before running it.",
     schema: z.object({}),
+  },
+);
+
+/**
+ * Tool to execute Jest tests.
+ * Essential for TDD workflow.
+ */
+export const executeTestsTool = tool(
+  async ({ filePath }) => {
+    log.tool(
+      filePath
+        ? `Running tests for: ${filePath}`
+        : "Running all project tests...",
+    );
+    const rootDir = process.cwd();
+
+    // Comando: si hay filePath, ejecutamos ese archivo; si no, todo.
+    const command = filePath
+      ? `npx jest ${filePath} --passWithNoTests --no-stack-trace`
+      : `npm test`;
+
+    try {
+      const { stdout, stderr } = await execAsync(command, { cwd: rootDir });
+      log.tool("✅ TESTS PASSED.");
+      // Devolvemos un resumen para no saturar el contexto
+      return `✅ TEST SUCCESS.\n${stdout.slice(-1000)}`;
+    } catch (error: any) {
+      const output = error.stdout || error.stderr || error.message;
+      log.error("❌ TESTS FAILED.");
+      // El agente necesita ver el error para arreglarlo
+      return `❌ TEST FAILED. Fix the following logic errors:\n${output.slice(-2000)}`;
+    }
+  },
+  {
+    name: "run_tests",
+    description:
+      "Runs Jest tests. MANDATORY after writing a .spec.ts file to verify logic.",
+    schema: z.object({
+      filePath: z
+        .string()
+        .optional()
+        .describe("Path to the specific .spec.ts file to run."),
+    }),
+  },
+);
+
+/**
+ * Tool to list files in a directory.
+ * Helps the agent explore the real structure without relying only on RAG.
+ */
+export const listFilesTool = tool(
+  async ({ dirPath }) => {
+    try {
+      const rootDir = process.cwd();
+      const targetDir = path.resolve(rootDir, dirPath || ".");
+
+      if (!fs.existsSync(targetDir))
+        return `❌ Directory not found: ${dirPath}`;
+
+      const files = fs.readdirSync(targetDir, { withFileTypes: true });
+      const list = files
+        .map((f) => `${f.isDirectory() ? "📂" : "📄"} ${f.name}`)
+        .join("\n");
+
+      log.sys(`Listed directory: ${dirPath}`);
+      return `Contents of ${dirPath}:\n${list}`;
+    } catch (e: any) {
+      return `❌ Error listing directory: ${e.message}`;
+    }
+  },
+  {
+    name: "list_files",
+    description:
+      "Lists files and directories in a specific path. Use this to explore the project structure.",
+    schema: z.object({ dirPath: z.string().optional().default(".") }),
   },
 );

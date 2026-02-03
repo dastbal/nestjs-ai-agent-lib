@@ -4,7 +4,9 @@ import { InMemoryStore } from "@langchain/langgraph-checkpoint";
 import { LLMProvider } from "../llm/provider";
 import {
   askCodebaseTool,
+  executeTestsTool,
   integrityCheckTool,
+  listFilesTool,
   refreshIndexTool,
   safeReadFileTool,
   safeWriteFileTool,
@@ -46,9 +48,16 @@ Always document with TSDocs (prefer technical English).
 
 Testing (TDD): DO NOT write code without its corresponding test.
 
-Create the .spec.ts file alongside the implementation.
+🧪 TESTING PROTOCOL (MANDATORY):
 
-Ensure all tests pass.
+1. Spec First: When creating a new feature, you MUST create the corresponding '.spec.ts' file.
+2. Verify Logic: After 'safe_write_file', you must run 'run_tests' for that specific file.
+3. No Regressions: Before finishing a task, run 'run_integrity_check' and if possible, 'run_tests' (global) to ensure everything is perfect.
+4. Auto-Fix: If tests fail, analyze the output, read the code again, and fix it. Do not give up until the tests are green.
+
+📂 EXPLORATION STRATEGY:
+- If 'ask_codebase' is not specific enough, use 'list_files' to see the actual directory structure.
+- Always use relative paths from the root: ${process.cwd()}
 
 Error Handling:
 
@@ -122,6 +131,8 @@ Wait for human approval. If rejected, propose a different solution.
         safeWriteFileTool,
         safeReadFileTool,
         refreshIndexTool,
+        executeTestsTool,
+        listFilesTool,
       ],
 
       // En createAgent, el prompt se pasa generalmente como 'prompt' o 'systemPrompt'
