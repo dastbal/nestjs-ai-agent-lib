@@ -20,7 +20,11 @@
     "build": "tsc",
     "gen": "ts-node src/bin/cli.ts",
     "start:dev": "ts-node src/bin/cli.ts",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "type-check": "tsc --noEmit",
+    "test": "jest",
+    "test:cov": "jest --coverage",
+    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix"
   },
   "dependencies": {
     "@langchain/google-vertexai": "^2.1.6",
@@ -38,14 +42,17 @@
     "zod": "^4.3.5"
   },
   "peerDependencies": {
-  "@nestjs/common": "^10.0.0 || ^11.0.0",
-  "reflect-metadata": "^0.1.13 || ^0.2.0"
+    "@nestjs/common": "^10.0.0 || ^11.0.0",
+    "reflect-metadata": "^0.1.13 || ^0.2.0"
   },
   "devDependencies": {
     "@nestjs/common": "^10.4.22",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.19.30",
     "@types/uuid": "^10.0.0",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.0.0"
   }
