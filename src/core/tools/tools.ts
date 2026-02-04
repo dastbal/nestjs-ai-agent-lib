@@ -292,39 +292,73 @@ export const refreshIndexTool = tool(
  */
 export const executeTestsTool = tool(
   async ({ filePath }) => {
-    log.tool(
-      filePath
-        ? `Running tests for: ${filePath}`
-        : "Running all project tests...",
-    );
     const rootDir = process.cwd();
 
-    // Comando: si hay filePath, ejecutamos ese archivo; si no, todo.
-    const command = filePath
-      ? `npx jest ${filePath} --passWithNoTests --no-stack-trace`
-      : `npm test`;
+    // 1. Lógica para decidir el modo (Unitario vs Global)
+    let command = "npm test";
+    let modeDescription = "ALL project tests";
+
+    if (filePath) {
+      // 🛡️ Validación de ruta antes de llamar a Jest
+      const resolvedPath = path.resolve(rootDir, filePath);
+
+      if (!fs.existsSync(resolvedPath)) {
+        log.error(`Test file not found: ${filePath}`);
+        return `❌ Error: The file '${filePath}' does not exist. Did you mean to create it first? or did you use a wrong path?`;
+      }
+
+      // Si el agente manda un archivo .ts normal, intentamos buscar su .spec.ts
+      if (!resolvedPath.endsWith(".spec.ts") && resolvedPath.endsWith(".ts")) {
+        const potentialSpec = resolvedPath.replace(".ts", ".spec.ts");
+        if (fs.existsSync(potentialSpec)) {
+          return `⚠️ Warning: You tried to test '${filePath}' directly. I think you meant '${filePath.replace(".ts", ".spec.ts")}'. Please call run_tests with the .spec.ts file.`;
+        }
+      }
+
+      command = `npx jest ${filePath} --passWithNoTests --no-stack-trace`;
+      modeDescription = `single file: ${filePath}`;
+    }
+
+    log.tool(`🚀 Executing Jest (${modeDescription})...`);
 
     try {
+      // Ejecutamos el comando
       const { stdout, stderr } = await execAsync(command, { cwd: rootDir });
+
       log.tool("✅ TESTS PASSED.");
-      // Devolvemos un resumen para no saturar el contexto
-      return `✅ TEST SUCCESS.\n${stdout.slice(-1000)}`;
+
+      // Si todo sale bien, devolvemos un mensaje corto para ahorrar tokens
+      return `✅ SUCCESS: Tests passed for ${modeDescription}.\n${stdout.slice(-500)}`; // Resumen corto
     } catch (error: any) {
-      const output = error.stdout || error.stderr || error.message;
       log.error("❌ TESTS FAILED.");
-      // El agente necesita ver el error para arreglarlo
-      return `❌ TEST FAILED. Fix the following logic errors:\n${output.slice(-2000)}`;
+
+      // Capturamos la salida de error
+      const output = error.stdout || error.stderr || error.message;
+
+      // 🔥 ESTRATEGIA: Devolver una porción generosa del error para que el agente pueda leerlo y corregirlo
+      return `❌ TEST FAILED for ${modeDescription}. 
+      
+      Here is the failure output (analyze this to fix the code):
+      ---------------------------------------------------
+      ${output.slice(-2500)} 
+      ---------------------------------------------------
+      `;
     }
   },
   {
     name: "run_tests",
+    // 🧠 LA CLAVE: Descripción explícita de los dos modos
     description:
-      "Runs Jest tests. MANDATORY after writing a .spec.ts file to verify logic.",
+      "Executes the test suite using Jest. Supports two modes:\n" +
+      "1. SPECIFIC FILE (Recommended): Provide 'filePath' to run tests only for that file (fast).\n" +
+      "2. FULL SUITE: Omit 'filePath' (leave it empty) to run ALL tests in the project (slower, use for final check).",
     schema: z.object({
       filePath: z
         .string()
         .optional()
-        .describe("Path to the specific .spec.ts file to run."),
+        .describe(
+          "Relative path to the .spec.ts file (e.g., 'src/users/users.service.spec.ts'). LEAVE EMPTY/UNDEFINED to run all tests.",
+        ),
     }),
   },
 );
