@@ -1,4 +1,4 @@
-import { createAgent } from "langchain"; // Usamos la versión estándar
+import { CreateAgentParams, createAgent } from "langchain"; // Usamos la versión estándar
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import { InMemoryStore } from "@langchain/langgraph-checkpoint";
 import { LLMProvider } from "../llm/provider";
@@ -121,7 +121,8 @@ Wait for human approval. If rejected, propose a different solution.
 5. Focus vs. Context: While focusing on your specific task, maintain the "big picture" of the file. Do not break the file's internal consistency (naming conventions, patterns, or architecture).
     `;
     return createAgent({
-      model: LLMProvider.getModel(),
+      // model: LLMProvider.getModel(),
+      model: "gemini-2.5-flash-lite",
       checkpointer: checkpointer, // Para persistencia de memoria de corto plazo
 
       // Añadimos solo las herramientas necesarias
