@@ -14,11 +14,8 @@ This document outlines the advancements in version 1.0.7, introducing a sophisti
 # Install the agent (Version 1.0.7)
 npm install @dastbal/nestjs-ai-agent@1.0.7
 
-# Execute commands using the new LangGraph-based agent
-npx node "Create a new Payments service with DDD patterns"
-
-# The original 'gen' command is maintained for backward compatibility:
-# npx gen "Create a new Payments service with DDD patterns"
+# Execute commands using the CLI
+npx agent "Create a new Payments service with DDD patterns"
 ```
 
 ---
@@ -81,11 +78,11 @@ graph LR
 
 ## 💡 Usage Examples
 
-*   **Scaffolding:** `npx node "Create a UserEntity with email and password fields using TypeORM"`
-*   **Logic Implementation:** `npx node "Add a validation pipe to the login DTO"`
-*   **Testing:** `npx node "Write a unit test for the AuthService including mocks for the repository"`
-*   **Refactoring:** `npx node "Standardize all HTTP exceptions in the users controller"`
-*   **Code Generation:** `npx node "Generate a NestJS module for handling user authentication"`
+*   **Scaffolding:** `npx agent "Create a UserEntity with email and password fields using TypeORM"`
+*   **Logic Implementation:** `npx agent "Add a validation pipe to the login DTO"`
+*   **Testing:** `npx agent "Write a unit test for the AuthService including mocks for the repository"`
+*   **Refactoring:** `npx agent "Standardize all HTTP exceptions in the users controller"`
+*   **Code Generation:** `npx agent "Generate a NestJS module for handling user authentication"`
 
 ---
 

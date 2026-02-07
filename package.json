@@ -1,13 +1,13 @@
 {
   "name": "@dastbal/nestjs-ai-agent",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Autonomous AI Agent for NestJS - Principal Software Engineer Level with RAG and SQLite persistence",
   "author": "David Balladares",
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "gen": "dist/bin/cli.js"
+    "agent": "dist/bin/cli.js"
   },
   "files": [
     "dist",
@@ -19,8 +19,8 @@
   "scripts": {
     "build": "tsc",
     "gen": "ts-node src/bin/cli.ts",
+    "agent": "ts-node src/bin/cli.ts graph",
     "start:dev": "ts-node src/bin/cli.ts",
-    "node": "ts-node src/bin/cli.ts node",
     "prepublishOnly": "npm run build",
     "type-check": "tsc --noEmit",
     "test": "jest",

@@ -36,7 +36,7 @@ const askConfirmation = (query: string): Promise<boolean> => {
 };
 
 program
-  .name("gen")
+  .name("agent")
   .description("Autonomous Engineering Agent for NestJS (Classic)")
   .argument("<instruction>", "Technical instruction for the agent")
   .action(async (instruction: string) => {
@@ -68,7 +68,7 @@ program
   });
 
 program
-  .command("node")
+  .command("graph")
   .description("Autonomous Engineering Agent for NestJS (LangGraph Mode with HITL)")
   .argument("<instruction>", "Technical instruction for the agent")
   .action(async (instruction: string) => {
