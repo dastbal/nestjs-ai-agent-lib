@@ -10,7 +10,7 @@ import {
   refreshIndexTool,
   safeReadFileTool,
   safeWriteFileTool,
-} from "../tools/tools";
+} from "../tools";
 import * as path from "path";
 import * as fs from "fs";
 

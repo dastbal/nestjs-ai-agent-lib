@@ -11,24 +11,28 @@ import {
   refreshIndexTool,
   safeReadFileTool,
   safeWriteFileTool,
-} from "../tools/tools";
+  executeCommandTool,
+  askHumanTool,
+  deleteFileTool,
+  analyzeCodeStructureTool,
+  queryDependencyGraphTool,
+} from "../tools";
 import * as path from "path";
 import * as fs from "fs";
 
 /**
  * Interface representing the structured state of the agent.
- * Aligned with the original AgentState defined in core/agent/agent-state.ts
  */
 export interface AgentState {
   messages: BaseMessage[];
   selected_tool_name?: string | null;
   error?: string | null;
   finish_reason?: 'success' | 'error' | 'tool_failed' | 'no_tool_needed' | null;
+  session_files: string[]; // Tracks files created in the current interaction session
 }
 
 /**
  * LangGraph Annotation for state management.
- * Handles automatic concatenation of message arrays.
  */
 const AgentStateAnnotation = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
@@ -47,6 +51,10 @@ const AgentStateAnnotation = Annotation.Root({
     reducer: (x, y) => y ?? x,
     default: () => null,
   }),
+  session_files: Annotation<string[]>({
+    reducer: (x, y) => Array.from(new Set([...x, ...y])), // Merge and deduplicate
+    default: () => [],
+  }),
 });
 
 /**
@@ -54,7 +62,8 @@ const AgentStateAnnotation = Annotation.Root({
  */
 export class GraphAgentFactory {
   /**
-   * Creates and compiles a LangGraph agent.
+   * Creates and compiles a LangGraph agent with Lightweight HITL.
+   * 
    * @param threadId - Unique identifier for the conversation thread.
    * @returns A compiled LangGraph instance.
    */
@@ -63,97 +72,93 @@ export class GraphAgentFactory {
     const agentDir = path.join(rootDir, ".agent");
     if (!fs.existsSync(agentDir)) fs.mkdirSync(agentDir, { recursive: true });
 
-    // Persistence configuration using SQLite
     const dbPath = path.join(agentDir, "history_graph.db");
     const checkpointer = SqliteSaver.fromConnString(dbPath);
 
-    // Tool categories
-    const researchTools = [askCodebaseTool, listFilesTool, safeReadFileTool, refreshIndexTool];
-    const actionTools = [safeWriteFileTool, integrityCheckTool, executeTestsTool];
-    const allTools = [...researchTools, ...actionTools];
+    // Tool categorization for routing
+    const researchTools = [
+      askCodebaseTool, 
+      listFilesTool, 
+      safeReadFileTool, 
+      refreshIndexTool,
+      analyzeCodeStructureTool,
+      queryDependencyGraphTool,
+    ];
+    
+    // Tools that NEVER require HITL (Internal/Validation)
+    const valuationTools = [integrityCheckTool, executeTestsTool];
 
-    // Model instantiation via LLMProvider
+    // Tools that MAY require HITL depending on context
+    const modificationTools = [safeWriteFileTool, deleteFileTool];
+
+    // Tools that ALWAYS require HITL (Dangerous)
+    const dangerousTools = [executeCommandTool, askHumanTool];
+    
+    const allTools = [...researchTools, ...valuationTools, ...modificationTools, ...dangerousTools];
+
     const model = LLMProvider.getModel().bindTools(allTools);
 
     const mainSystemPrompt = `
-You are a Principal Software Engineer specialized in NestJS (Node.js). You are operating on a live, real-world project using a modular LangGraph architecture. Your goal is to deliver industrial-grade code while maintaining absolute project integrity.
+You are a Principal Software Engineer specialized in NestJS. You operate with a "Lightweight HITL" protocol.
 
-💎 QUALITY STANDARDS (UNBREAKABLE):
-- Architecture: Strictly follow DDD (Domain-Driven Design) and NestJS Best Practices (Controllers, Services, Providers, Modules).
-- Typing: Strict TypeScript. The use of 'any' is FORBIDDEN. Use proper interfaces and classes.
-- Documentation: Always document public methods and complex logic with TSDocs in technical English.
-- Validation: Use strict DTOs with 'class-validator' and 'class-transformer'.
+💎 QUALITY STANDARDS:
+- Architecture: DDD, Controllers, Services, Modules.
+- Typing: Strict TypeScript. NO 'any'.
+- Documentation: TSDocs in Technical English.
 
-🧪 TESTING & INTEGRITY PROTOCOL (MANDATORY):
-1. Spec First: When creating a new feature, you MUST create the corresponding '.spec.ts' file before or alongside the implementation.
-2. The Surgeon's Rule (Read-Before-Write): NEVER overwrite or edit a file without reading it first using 'safe_read_file'. You must understand the existing logic, TSDocs, and dependencies.
-3. Anti-Regression: Preserve existing documentation, helpful comments, and unrelated business logic. Your goal is to AUGMENT, not destroy.
-4. Self-Healing: After 'safe_write_file', you MUST run 'run_integrity_check' (tsc) AND 'run_tests' for the affected file. If errors occur, analyze the output and fix them yourself.
+🚀 ZERO-FRICTION PROTOCOL:
+You can work autonomously on tasks that involve CREATING or MODIFYING code. Manual approval is only required for high-risk deletions or environment changes.
 
-⚙️ GRAPH ARCHITECTURE & EXECUTION:
-- INDEXER: On Every run, the system silently indexes the project. Your context via 'ask_codebase' is always fresh.
-- RESEARCHER NODE: Use 'ask_codebase' for semantic search and graph dependencies. Use 'list_files' if you are unsure of the folder structure. 
-- ACTOR NODE: Use 'safe_write_file' for all writes. It automatically handles backups in '.agent/backups'.
+1. ✅ AUTOMATED ACTIONS (Safe Actor):
+   - Creating NEW FILES or Modifying PRE-EXISTING files.
+   - Deleting files that YOU created in this session (session_files).
+   - Running tests and integrity checks.
+2. ⚠️ PROTECTED ACTIONS (Dangerous Actor - Pauses for Approval):
+   - Deleting code that EXISTED before the current task.
+   - Executing arbitrary terminal commands (npm install, etc.).
+   - Asking for help via 'ask_human'.
 
-📂 OPERATIONAL STRATEGY:
-- Use RELATIVE PATHS (e.g., 'src/users/users.service.ts').
-- RESEARCH (ask_codebase) -> READ (safe_read_file) -> PLAN -> IMPLEMENT (safe_write_file) -> VALIDATE (run_integrity_check / run_tests).
-- If after 3 self-correction attempts you cannot fix an error, explain the issue clearly and ask for human help.
+📝 SUMMARY RULE:
+At the very end of your task, provide a SUPER BRIEF summary of which files were modified (e.g., "Modified: src/app.module.ts, created: src/test.spec.ts").
 
-🚨 SAFETY RULES:
-- Never perform mass file deletions.
-- Double-check imports when modifying core files like 'app.module.ts'.
-- Never swallowed errors (no empty catch blocks).
+STUCK PROTOCOL:
+- Use 'ask_human' if you are in a loop or mismatching context. Explain exactly what you need.
+
+📂 STRATEGY:
+- RESEARCH -> PLAN -> IMPLEMENT -> VALIDATE.
+- Read files before modifying them.
+- After every 'safe_write_file', use 'run_integrity_check' and 'run_tests'.
+
+🛠️ SELF-HEALING & STRUCTURAL AWARENESS:
+- If a test fails with "undefined" or signature mismatches, use 'analyze_code_structure' to see the service's signatures without full implementation noise.
+- Always check if a method is 'async' before mocking it; 'async' methods MUST return a Promise (use .mockResolvedValue() or return Promise.resolve()).
+- If you get stuck in a loop of failures, rethink your mock strategy based on the 'analyze_code_structure' output.
 `;
 
-    /**
-     * Node 1: Indexer
-     * Ensures the codebase RAG index is up-to-date before reasoning starts.
-     */
     const indexerNode = async (state: typeof AgentStateAnnotation.State) => {
       console.log("⚙️ [NODE: INDEXER] Syncing codebase index...");
       const indexer = new IndexerService();
       await indexer.indexProject();
-      return {}; // No state changes needed, just a process node
+      return {}; 
     };
 
-    /**
-     * Node 2: Agent (Reasoning)
-     * Thinks and decides which tool to call or responds to the user.
-     */
     const agentNode = async (state: typeof AgentStateAnnotation.State) => {
       console.log("🧠 [NODE: AGENT] Reasoning...");
-      const messages: BaseMessage[] = [
-        new SystemMessage(mainSystemPrompt),
-        ...state.messages,
-      ];
+      const messages: BaseMessage[] = [new SystemMessage(mainSystemPrompt), ...state.messages];
       const response = await (model as any).invoke(messages);
-      
-      const selectedTool = response.tool_calls?.[0]?.name || null;
-      return { 
-        messages: [response],
-        selected_tool_name: selectedTool
-      };
+      return { messages: [response], selected_tool_name: response.tool_calls?.[0]?.name || null };
     };
 
-    /**
-     * Node 3: Researcher (Read-only tools)
-     * Executes queries and file reads.
-     */
     const researcherNode = async (state: typeof AgentStateAnnotation.State) => {
       console.log("🔍 [NODE: RESEARCHER] Executing discovery tools...");
       const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
       const toolMessages: ToolMessage[] = [];
-
       if (lastMessage.tool_calls) {
         for (const toolCall of lastMessage.tool_calls) {
           const tool = researchTools.find((t) => t.name === toolCall.name);
           if (tool) {
             const output = await (tool as any).invoke(toolCall.args);
-            toolMessages.push(new ToolMessage({
-              tool_call_id: toolCall.id!,
-              content: typeof output === "string" ? output : JSON.stringify(output),
-            }));
+            toolMessages.push(new ToolMessage({ tool_call_id: toolCall.id!, content: typeof output === "string" ? output : JSON.stringify(output) }));
           }
         }
       }
@@ -161,57 +166,100 @@ You are a Principal Software Engineer specialized in NestJS (Node.js). You are o
     };
 
     /**
-     * Node 4: Actor (Write & Validate tools)
-     * Executes file mutations and build checks.
+     * Node: Safe Actor (Automated writes, tests, and self-deletions)
      */
-    const actorNode = async (state: typeof AgentStateAnnotation.State) => {
-      console.log("🛠️ [NODE: ACTOR] Executing implementation tools...");
+    const safeActorNode = async (state: typeof AgentStateAnnotation.State) => {
+      console.log("🟢 [NODE: SAFE ACTOR] Executing automated tools...");
+      const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
+      const toolMessages: ToolMessage[] = [];
+      const newSessionFiles: string[] = [];
+
+      if (lastMessage.tool_calls) {
+        for (const toolCall of lastMessage.tool_calls) {
+          const tool = [...valuationTools, ...modificationTools].find((t) => t.name === toolCall.name);
+          if (tool) {
+            const output = await (tool as any).invoke(toolCall.args);
+            
+            // Extract session file metadata
+            if (toolCall.name === "safe_write_file" && typeof output === "string") {
+              const metaMatch = output.match(/\[METADATA: (.*)\]/);
+              if (metaMatch) {
+                const meta = JSON.parse(metaMatch[1]);
+                if (meta.action === "created") newSessionFiles.push(meta.path);
+              }
+            }
+            toolMessages.push(new ToolMessage({ tool_call_id: toolCall.id!, content: output }));
+          }
+        }
+      }
+      return { messages: toolMessages, session_files: newSessionFiles };
+    };
+
+    /**
+     * Node: Dangerous Actor (Legacy deletions, terminal commands, human interaction)
+     * 🛡️ PROTECTED BY HITL BREAKPOINT.
+     */
+    const dangerousActorNode = async (state: typeof AgentStateAnnotation.State) => {
+      console.log("🔴 [NODE: DANGEROUS ACTOR] Waiting for approval/input...");
       const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
       const toolMessages: ToolMessage[] = [];
 
       if (lastMessage.tool_calls) {
         for (const toolCall of lastMessage.tool_calls) {
-          const tool = actionTools.find((t) => t.name === toolCall.name);
+          const tool = [...modificationTools, ...dangerousTools].find((t) => t.name === toolCall.name);
           if (tool) {
             const output = await (tool as any).invoke(toolCall.args);
-            toolMessages.push(new ToolMessage({
-              tool_call_id: toolCall.id!,
-              content: typeof output === "string" ? output : JSON.stringify(output),
-            }));
+            toolMessages.push(new ToolMessage({ tool_call_id: toolCall.id!, content: typeof output === "string" ? output : JSON.stringify(output) }));
           }
         }
       }
       return { messages: toolMessages };
     };
 
-    // 3. Define Graph Structure
     const workflow = new StateGraph(AgentStateAnnotation)
-      // Nodes
       .addNode("indexer", indexerNode)
       .addNode("agent", agentNode)
       .addNode("researcher", researcherNode)
-      .addNode("actor", actorNode)
+      .addNode("safe_actor", safeActorNode)
+      .addNode("dangerous_actor", dangerousActorNode)
       
-      // Edges
       .addEdge(START, "indexer")
       .addEdge("indexer", "agent")
       .addConditionalEdges("agent", (state) => {
         const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
-        if (!lastMessage.tool_calls || lastMessage.tool_calls.length === 0) {
-          return END;
+        if (!lastMessage.tool_calls || lastMessage.tool_calls.length === 0) return END;
+        
+        const toolCall = lastMessage.tool_calls[0];
+        const { name, args } = toolCall;
+
+        if (researchTools.some(t => t.name === name)) return "researcher";
+        if (valuationTools.some(t => t.name === name)) return "safe_actor";
+        if (dangerousTools.some(t => t.name === name)) return "dangerous_actor";
+
+        // Logic for Writes and Deletes
+        if (name === "safe_write_file") {
+          // ANY modification or creation is now considered safe by user request
+          return "safe_actor";
         }
         
-        // Routing logic: which node handles the requested tools?
-        const toolName = lastMessage.tool_calls[0].name;
-        if (researchTools.some(t => t.name === toolName)) return "researcher";
-        if (actionTools.some(t => t.name === toolName)) return "actor";
+        if (name === "delete_file") {
+          const filePath = args.filePath as string;
+          // Security: Always protect core configuration and source root directly
+          const isCritical = filePath.includes(".env") || filePath === "package.json" || filePath === "tsconfig.json";
+          const isSessionFile = state.session_files.includes(filePath);
+          
+          // If it's a file created in this session OR a non-critical file, we can treat it as safer
+          // but for now, we keep the HITL for everything except session files to be 100% sure.
+          // The fix for the loop is ensuring the dangerous_actor properly transitions back.
+          return isSessionFile ? "safe_actor" : "dangerous_actor";
+        }
         
-        return END; // Safety fallback
+        return END;
       })
       .addEdge("researcher", "agent")
-      .addEdge("actor", "agent");
+      .addEdge("safe_actor", "agent")
+      .addEdge("dangerous_actor", "agent");
 
-    // 4. Compile with persistence
-    return workflow.compile({ checkpointer });
+    return workflow.compile({ checkpointer, interruptBefore: ["dangerous_actor"] });
   }
 }

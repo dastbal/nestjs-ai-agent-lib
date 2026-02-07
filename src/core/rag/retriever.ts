@@ -13,6 +13,7 @@ interface FileContext {
   relevance: number;
   chunks: ProcessedChunk[];
   imports: string[];
+  skeleton?: string; // <--- ADDED
 }
 
 export class RetrieverService {
@@ -54,6 +55,23 @@ export class RetrieverService {
     });
 
     return scoredChunks.sort((a, b) => b.score - a.score).slice(0, limit);
+  }
+
+  /**
+   * Retrieves the 'Skeleton' (Signatures) for a file from the registry.
+   */
+  private getFileSkeleton(sourcePath: string): string | undefined {
+    const normalizedPath = sourcePath.split(path.sep).join('/');
+    try {
+      const stmt = this.db.prepare(
+        'SELECT skeleton_signature FROM file_registry WHERE path = ? OR path = ?',
+      );
+      const result = stmt.get(normalizedPath, sourcePath) as any;
+      return result?.skeleton_signature;
+    } catch (error) {
+      console.error(`Error fetching skeleton for ${sourcePath}:`, error);
+      return undefined;
+    }
   }
 
   /**
@@ -110,6 +128,7 @@ export class RetrieverService {
           relevance: res.score,
           chunks: [],
           imports: this.getDependencies(path), // <--- GRAPH MAGIC 🕸️
+          skeleton: this.getFileSkeleton(path), // <--- STRUCTURAL MAGIC 🏗️
         });
       }
       filesMap.get(path)?.chunks.push(res.chunk);
@@ -137,7 +156,11 @@ export class RetrieverService {
           output += `   - (...and ${fileCtx.imports.length - 5} more)\n`;
       }
 
-      output += `\n📝 **CODE SNIPPETS:**\n`;
+      if (fileCtx.skeleton) {
+        output += `🏗️ **FILE SKELETON (MAP):**\n${fileCtx.skeleton}\n\n`;
+      }
+
+      output += `📝 **CODE SNIPPETS:**\n`;
       fileCtx.chunks.forEach((chunk) => {
         output += `   --- [${chunk.metadata.methodName || 'Class Structure'}] ---\n`;
         output += `${chunk.content.trim()}\n\n`;
