@@ -4,7 +4,7 @@
 [![npm version](https://img.shields.io/npm/v/@dastbal/nestjs-ai-agent.svg)](https://www.npmjs.com/package/@dastbal/nestjs-ai-agent)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Transform your NestJS development with an agent that doesn't just "chat", but **operates** directly on your codebase with Senior-level precision.
+Transform your NestJS development with an agent that doesn't just "chat", but **operates** directly on your codebase with Senior-level precision. This version leverages a modular LangGraph architecture for enhanced control and validation.
 
 ---
 
@@ -14,8 +14,12 @@ Transform your NestJS development with an agent that doesn't just "chat", but **
 # Install the agent
 npm install @dastbal/nestjs-ai-agent
 
-# Run your first command
-npx gen "Create a new Payments service with DDD patterns"
+# Run your first command using the new LangGraph-based agent
+# This command utilizes the Indexer, Researcher, and Actor nodes for robust operations.
+npx node "Create a new Payments service with DDD patterns"
+
+# The original 'gen' command is still available for backward compatibility:
+# npx gen "Create a new Payments service with DDD patterns"
 ```
 
 ---
@@ -24,6 +28,10 @@ npx gen "Create a new Payments service with DDD patterns"
 
 This agent operates with a strict set of principles and advanced capabilities:
 
+*   **🧠 LangGraph Architecture:** Employs a modular graph with distinct nodes:
+    *   **Indexer Node:** Automatically runs at the start to ensure the codebase RAG index is up-to-date.
+    *   **Researcher Node:** Executes read-only operations like code analysis (`ask_codebase`) and file inspection (`safe_read_file`, `list_files`).
+    *   **Actor Node:** Handles write operations (`safe_write_file`) and validation (`run_integrity_check`, `run_tests`).
 *   **🔍 RAG Search:** Performs semantic search across your entire codebase before proposing changes, ensuring context-aware development.
 *   **🩺 The Surgeon Rule:** Never overwrites a file without reading and analyzing it first, preserving existing logic and intent.
 *   **✅ Self-Healing:** Runs integrity checks (TypeScript compiler) and attempts to auto-fix compilation errors (up to 3 retries).
@@ -43,16 +51,30 @@ This agent operates with a strict set of principles and advanced capabilities:
 
 ---
 
-## ⚙️ Internal Workflow
+## ⚙️ Internal Workflow (LangGraph)
 
-The agent follows a strict Principal Engineer protocol:
+The agent follows a strict Principal Engineer protocol orchestrated by the LangGraph:
 
-1.  **Research:** Uses `ask_codebase` to find existing patterns, logic, and dependencies.
-2.  **Comprehension:** Reads existing code using `safe_read_file` to understand context and avoid regressions.
-3.  **Implementation:** Writes new code adhering to DDD principles, strict TypeScript typing (no `any`), and TSDocs.
-4.  **Validation:** Runs `run_integrity_check` (TypeScript compiler) immediately after implementation to ensure type safety.
-5.  **Safety:** Creates backups before writing files using `safe_write_file`.
-6.  **Human-in-the-loop:** Pauses for explicit approval before performing critical file operations or major changes.
+```mermaid
+graph LR
+  START((START)) --> Indexer[Indexer Node]
+  Indexer --> Agent[Agent Node]
+  Agent --> Researcher{Researcher Node}
+  Agent --> Actor{Actor Node}
+  Researcher --> Agent
+  Actor --> Agent
+  Agent --> END((END))
+```
+
+1.  **Initialization:** The graph starts with the **Indexer Node**, ensuring the codebase RAG index is current.
+2.  **Reasoning:** The **Agent Node** (core LLM) analyzes the user's request and the indexed codebase.
+3.  **Tool Selection:** Based on the request, the Agent Node routes to either the **Researcher Node** (for read operations) or the **Actor Node** (for write/validation operations).
+4.  **Execution:**
+    *   **Researcher Node:** Executes tools like `ask_codebase`, `safe_read_file`, `list_files`.
+    *   **Actor Node:** Executes tools like `safe_write_file`, `run_integrity_check`, `run_tests`.
+5.  **Feedback Loop:** Results from Researcher or Actor nodes are fed back to the Agent Node for further reasoning or task completion.
+6.  **Validation:** The Actor Node ensures code integrity via `run_integrity_check` and `run_tests` after modifications.
+7.  **Persistence:** Conversation history and agent state are managed via a checkpointer.
 
 ---
 
@@ -60,11 +82,11 @@ The agent follows a strict Principal Engineer protocol:
 
 Try these commands to see the agent in action:
 
-*   **Scaffolding:** `"Create a UserEntity with email and password fields using TypeORM"`
-*   **Logic Implementation:** `"Add a validation pipe to the login DTO"`
-*   **Testing:** `"Write a unit test for the AuthService including mocks for the repository"`
-*   **Refactoring:** `"Standardize all HTTP exceptions in the users controller"`
-*   **Code Generation:** `"Generate a NestJS module for handling user authentication"`
+*   **Scaffolding:** `npx node "Create a UserEntity with email and password fields using TypeORM"`
+*   **Logic Implementation:** `npx node "Add a validation pipe to the login DTO"`
+*   **Testing:** `npx node "Write a unit test for the AuthService including mocks for the repository"`
+*   **Refactoring:** `npx node "Standardize all HTTP exceptions in the users controller"`
+*   **Code Generation:** `npx node "Generate a NestJS module for handling user authentication"`
 
 ---
 
