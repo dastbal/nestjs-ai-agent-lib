@@ -1,6 +1,5 @@
 name: Node.js CI
 
-# ¿Cuándo se ejecuta?
 on:
   push:
     branches: [ "main" ]
@@ -8,18 +7,18 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
-        node-version: [18.x, 20.x] # Prueba en Node 18 y 20
+        node-version: [18.x, 20.x, 22.x]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
@@ -27,5 +26,8 @@ jobs:
     - name: Install dependencies
       run: npm ci
       
+    - name: Run Type Check 🔍
+      run: npm run type-check
+
     - name: Run Tests 🧪
       run: npm test
