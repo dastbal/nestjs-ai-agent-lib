@@ -1,26 +1,38 @@
 # @dastbal/nestjs-ai-agent 🧙‍♂️
 ### Autonomous Principal Software Engineer for NestJS
 
-[![npm version](https://img.shields.io/npm/v/@dastbal/nestjs-ai-agent.svg?version=1.0.7)](https://www.npmjs.com/package/@dastbal/nestjs-ai-agent)
+[![npm version](https://img.shields.io/npm/v/@dastbal/nestjs-ai-agent.svg?version=1.0.8)](https://www.npmjs.com/package/@dastbal/nestjs-ai-agent)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-This document outlines the advancements in version 1.0.7, introducing a sophisticated LangGraph architecture with modularized tools and enhanced RAG capabilities.
+This document outlines the advancements in version 1.0.8, introducing a sophisticated LangGraph architecture with modularized tools and enhanced RAG capabilities.
 
 ---
 
 ## 🚀 Quick Start
 
 ```bash
-# Install the agent (Version 1.0.7)
-npm install @dastbal/nestjs-ai-agent@1.0.7
+# Install the agent (Version 1.0.8)
+npm install @dastbal/nestjs-ai-agent@1.0.8
 
-# Execute commands using the CLI
+# Execute commands using the CLI (Defaults to Graph Mode)
 npx agent "Create a new Payments service with DDD patterns"
 ```
 
 ---
 
-## 💎 Key Features & Architecture (v1.0.7)
+## 💻 CLI Commands
+
+The agent CLI provides two different execution engines:
+
+*   **`npx agent "<instruction>"`** (Default/Graph): Uses the **LangGraph** orchestrator with RAG indexing and HITL (Human-In-The-Loop) approval flow.
+*   **`npx agent classic "<instruction>"`**: Uses the legacy "Classic" engine (deterministic sequencial flow).
+
+> [!TIP]
+> Use the default Graph mode for complex engineering tasks that require reasoning and multi-step tool interactions.
+
+---
+
+## 💎 Key Features & Architecture (v1.0.8)
 
 This agent operates with a strict set of principles and advanced capabilities, now enhanced with Structural RAG:
 

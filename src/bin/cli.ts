@@ -37,39 +37,7 @@ const askConfirmation = (query: string): Promise<boolean> => {
 
 program
   .name("agent")
-  .description("Autonomous Engineering Agent for NestJS (Classic)")
-  .argument("<instruction>", "Technical instruction for the agent")
-  .action(async (instruction: string) => {
-    // ... Existing 'gen' logic preserved ...
-    try {
-      if (!instruction || instruction.trim().length === 0) {
-        log.error("Provide a valid instruction.");
-        return;
-      }
-      log.sys("Initializing Agent in CLI mode...");
-      const threadId = "cli-user";
-      const agent = await AgentFactory.create(threadId);
-      log.ai(`Procesando: "${instruction}"`);
-      const response = await agent.invoke(
-        { messages: [new HumanMessage(instruction)] },
-        { configurable: { thread_id: threadId }, recursionLimit: 50 },
-      );
-      const lastMessage = response.messages[response.messages.length - 1];
-      if (lastMessage && lastMessage.content) {
-        console.log("\n" + chalk.green("--- RESPUESTA DEL AGENTE ---"));
-        console.log(lastMessage.content);
-        console.log(chalk.green("----------------------------\n"));
-      }
-      log.sys("Tarea completada.");
-    } catch (error: any) {
-      log.error("Error in agent:");
-      log.error(error?.message || "Unknown error");
-    }
-  });
-
-program
-  .command("graph")
-  .description("Autonomous Engineering Agent for NestJS (LangGraph Mode with HITL)")
+  .description("Autonomous Engineering Agent for NestJS (Graph-based with HITL)")
   .argument("<instruction>", "Technical instruction for the agent")
   .action(async (instruction: string) => {
     try {
@@ -123,16 +91,11 @@ program
 
               log.sys("Sending response to agent...");
               
-              // 🎓 IMPORTANT: To feed a tool response back manually during an interrupt:
-              // 1. We prepare a ToolMessage with the user's input.
-              // 2. We update the state with this message.
-              // 3. We resume the graph.
               const toolMessage = new ToolMessage({
                 tool_call_id: toolCall.id!,
                 content: userResponse,
               });
 
-              // We update the state with the tool result manually before resuming
               await agent.updateState(config, { messages: [toolMessage] });
               response = await agent.invoke(null, config);
             } 
@@ -152,15 +115,11 @@ program
               if (confirmed) {
                 log.sys("Approval received. Resuming execution...");
                 
-                // 🎓 FIX: Before resuming, we inject a "dummy" tool response or a confirmation 
-                // to the state so the agent knows the previous tool CALL was authorized.
-                // This prevents the "infinite loop" where the agent thinks it needs to ask again.
                 const toolMessages = lastMessage.tool_calls.map(tc => new ToolMessage({
                    tool_call_id: tc.id!,
                    content: "✅ Approved by user. Executing now..."
                 }));
                 
-                // We update state with the approval 'receipt'
                 await agent.updateState(config, { messages: toolMessages });
                 response = await agent.invoke(null, config);
               } else {
@@ -187,6 +146,50 @@ program
       log.error("Error in graph agent:");
       log.error(error?.message || "Unknown error");
     }
+  });
+
+program
+  .command("classic")
+  .description("Autonomous Engineering Agent for NestJS (Legacy/Classic Mode)")
+  .argument("<instruction>", "Technical instruction for the agent")
+  .action(async (instruction: string) => {
+    try {
+      if (!instruction || instruction.trim().length === 0) {
+        log.error("Provide a valid instruction.");
+        return;
+      }
+      log.sys("Initializing Agent in CLI mode (Classic)...");
+      const threadId = "cli-user";
+      const agent = await AgentFactory.create(threadId);
+      log.ai(`Procesando: "${instruction}"`);
+      const response = await agent.invoke(
+        { messages: [new HumanMessage(instruction)] },
+        { configurable: { thread_id: threadId }, recursionLimit: 50 },
+      );
+      const lastMessage = response.messages[response.messages.length - 1];
+      if (lastMessage && lastMessage.content) {
+        console.log("\n" + chalk.green("--- RESPUESTA DEL AGENTE ---"));
+        console.log(lastMessage.content);
+        console.log(chalk.green("----------------------------\n"));
+      }
+      log.sys("Tarea completada.");
+    } catch (error: any) {
+      log.error("Error in agent:");
+      log.error(error?.message || "Unknown error");
+    }
+  });
+
+program
+  .command("graph")
+  .description("Same as default: use the Graph-based agent")
+  .argument("<instruction>", "Technical instruction for the agent")
+  .action(async (instruction: string) => {
+    // Just delegate to the main root action logic (we can just call it or keep it separate)
+    // For simplicity, I'll repeat the action or refactor it.
+    // Let's just point both to the same logic by calling the root action or similar.
+    // Actually, program.action handles the root, and subcommands handle subcommands.
+    // I will just keep the logic here as well for now to avoid complexity in command registration.
+    program.parse([process.argv[0], process.argv[1], instruction]);
   });
 
 program.parse(process.argv);
