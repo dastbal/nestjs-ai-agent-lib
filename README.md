@@ -724,30 +724,39 @@ Nothing to clone and nothing to install globally. In the repository you want
 served, run:
 
 ```bash
-npx -y @dastbal/umbra@2.2.3 init
+npx -y @dastbal/umbra@2.2.4 init
 ```
 
-Choose **Configure MCP server** when prompted. Umbra detects verified local
-clients and always shows the absolute repository root and startup command before
-asking for confirmation. It changes nothing by default; `npm install` and
-package postinstall hooks never modify consumer configuration.
+Choose **Configure MCP server** when prompted, or run the setup once later.
+Umbra detects verified local clients and registers one **user-scoped** entry.
+It changes nothing by default; `npm install` and package postinstall hooks never
+modify consumer configuration.
 
 Run the flow again at any time:
 
 ```bash
-umbra setup mcp       # detect Codex and Claude
-umbra setup codex     # configure and verify Codex only
-umbra setup claude    # update only mcpServers.umbra in .mcp.json
+umbra setup mcp       # detect and configure global Codex and Claude entries
+umbra setup codex     # configure and verify global Codex only
+umbra setup claude    # configure and verify global Claude only
 ```
 
-Codex is configured through `codex mcp add` and verified with `codex mcp get
-umbra`; restart an existing Codex session afterwards. Claude keeps the additive
-project `.mcp.json` adapter. Other MCP clients receive a standard JSON definition
-to copy, rather than Umbra guessing their configuration format.
+That one registration works for every repository you later open. When Claude
+starts Umbra, it supplies its active project through `CLAUDE_PROJECT_DIR`; Codex
+uses the directory from which it launches the MCP process. Umbra validates that
+directory, pins it for that one server process, creates `<project>/.umbra/` when
+the index first needs it, and warms that project's index. A server never accepts
+a path from an MCP tool call.
 
-The generated entry pins the current repository by its absolute path. If your
-team wants a portable, committed Claude Code configuration instead, create
-`.mcp.json` yourself with `${CLAUDE_PROJECT_DIR}`:
+If a client cannot identify an active project, Umbra refuses to start with an
+actionable message rather than creating `.umbra/` in your home directory. Open
+the client from the repository and reconnect it.
+
+Codex is configured through `codex mcp add` and verified with `codex mcp get
+umbra`; restart an existing Codex session afterwards. Claude is configured with
+`claude mcp add --scope user` and verified with `claude mcp get umbra`. On native
+Windows, its adapter uses the documented `cmd /c npx` wrapper. Other MCP clients
+receive this standard definition to copy, rather than Umbra guessing their
+configuration format:
 
 ```json
 {
@@ -755,16 +764,16 @@ team wants a portable, committed Claude Code configuration instead, create
     "umbra": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@dastbal/umbra", "mcp", "--root", "${CLAUDE_PROJECT_DIR}"]
+      "args": ["-y", "@dastbal/umbra", "mcp", "--auto-root"]
     }
   }
 }
 ```
 
 That is the whole setup. `npx -y` fetches and runs the package without
-installing it — the same shape every other MCP server is distributed in — and
-`${CLAUDE_PROJECT_DIR}` is expanded by Claude Code to the project root, so the
-file is portable and safe to commit for a team.
+installing it — the same shape every other MCP server is distributed in. A
+project-scoped entry remains available when a team deliberately wants to pin a
+single root; use `umbra mcp --root <absolute-project-root>` for that case.
 
 The optional peer dependency has to be reachable too, so either add it to that
 project (`npm i @modelcontextprotocol/sdk`) or install both globally:
@@ -780,7 +789,8 @@ all.
 
 | Flag | Meaning |
 |---|---|
-| `--root <path>` | **Required.** The repository to serve. Fixed at launch; no tool argument can change it |
+| `--root <path>` | Explicit repository to serve. Fixed at launch; no tool argument can change it |
+| `--auto-root` | Resolve the trusted active client project, then pin it for this process. Used by global MCP setup |
 | `--embeddings <vertex\|ollama>` | Provider for semantic search. Defaults to `.umbra/agent.config.json`, else `ollama` |
 | `--no-index` | Do not warm the semantic index at launch |
 
@@ -887,9 +897,9 @@ missing.
 
 ### Removing it
 
-Delete the entry from `.mcp.json`. There is nothing else to undo: no daemon, no
-credentials handed out, no state outside the repository's own gitignored
-`.umbra/` directory.
+Remove the user entry with `claude mcp remove umbra` or `codex mcp remove umbra`.
+There is nothing else to undo: no daemon, no credentials handed out, and each
+project keeps only its own gitignored `.umbra/` directory.
 
 
 ---

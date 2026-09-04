@@ -2,7 +2,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { buildUmbraMcpServer, ensureUmbraMcpConfiguration } from './mcp-config';
+import {
+  buildGlobalUmbraMcpServer,
+  buildUmbraMcpServer,
+  ensureUmbraMcpConfiguration,
+  globalClaudeMcpCommand,
+} from './mcp-config';
 
 describe('ensureUmbraMcpConfiguration', () => {
   let rootDir: string;
@@ -36,6 +41,23 @@ describe('ensureUmbraMcpConfiguration', () => {
       command: 'npx',
       args: ['-y', '@dastbal/umbra', 'mcp', '--root', rootDir],
     });
+  });
+
+  it('builds a global entry that resolves a project at MCP launch rather than storing one root', () => {
+    expect(buildGlobalUmbraMcpServer()).toEqual({
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', '@dastbal/umbra', 'mcp', '--auto-root'],
+    });
+  });
+
+  it('uses Claude Code\'s documented cmd wrapper for native Windows npx servers', () => {
+    expect(globalClaudeMcpCommand('win32')).toEqual([
+      'cmd', '/c', 'npx', '-y', '@dastbal/umbra', 'mcp', '--auto-root',
+    ]);
+    expect(globalClaudeMcpCommand('linux')).toEqual([
+      'npx', '-y', '@dastbal/umbra', 'mcp', '--auto-root',
+    ]);
   });
 
   it('preserves existing servers while adding Umbra', () => {

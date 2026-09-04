@@ -30,10 +30,10 @@ import {
 } from "../core/config/agent-directory";
 import { ensureWorkspaceSkills } from "../core/config/workspace-scaffold";
 import {
-  buildUmbraMcpServer,
-  configureCodexMcp,
+  buildGlobalUmbraMcpServer,
+  configureGlobalClaudeMcp,
+  configureGlobalCodexMcp,
   detectSupportedMcpClients,
-  ensureUmbraMcpConfiguration,
   SupportedMcpClient,
 } from '../core/config/mcp-config';
 import { hasIncompleteToolTurn } from '../presentation/cli/incomplete-tool-turn';
@@ -48,6 +48,7 @@ import { GoogleApplicationDefaultAuth } from '../presentation/cli/google-applica
 import { configureLangSmith, hasLangSmithConfiguration } from '../core/observability/langsmith-config';
 import { askSecret, askText, confirm } from '../presentation/cli/prompts';
 import { startMcpServer } from '../presentation/mcp';
+import { resolveMcpProjectRoot } from '../presentation/mcp/project-root';
 import { IndexerService } from '../core/rag/indexer';
 import { resolveEmbeddings } from '../core/rag/embeddings/embeddings-resolver';
 import { probeEmbeddings } from '../core/rag/embeddings/embeddings-availability';
@@ -98,11 +99,10 @@ async function setupLangSmith(): Promise<void> {
   }
 }
 
-/** Configures one verified MCP client only after the operator confirms the pinned root. */
+/** Configures one verified client once for every local project the client opens. */
 async function setupMcpClient(client: SupportedMcpClient): Promise<void> {
-  const rootDir = path.resolve(process.cwd());
-  const server = buildUmbraMcpServer(rootDir);
-  log.sys(`Umbra will serve: ${rootDir}`);
+  const server = buildGlobalUmbraMcpServer();
+  log.sys('Umbra will resolve and pin the active project when the client starts MCP.');
   log.sys(`MCP command: ${server.command} ${(server.args as string[]).join(' ')}`);
   const enabled = await confirm({
     question: `Configure Umbra for ${client === 'codex' ? 'Codex' : 'Claude'}?`,
@@ -117,12 +117,12 @@ async function setupMcpClient(client: SupportedMcpClient): Promise<void> {
 
   try {
     if (client === 'codex') {
-      configureCodexMcp(rootDir);
-      log.sys('Codex MCP entry verified. Restart Codex to load it in an existing session.');
+      configureGlobalCodexMcp();
+      log.sys('Global Codex MCP entry verified. Restart Codex to load it in an existing session.');
       return;
     }
-    const result = ensureUmbraMcpConfiguration(rootDir);
-    log.sys(`Claude MCP configuration ${result.status}: ${result.path}`);
+    configureGlobalClaudeMcp();
+    log.sys('Global Claude MCP entry verified. Start Claude inside a project to create .umbra and index it.');
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     log.error(`MCP configuration was not changed: ${message}`);
@@ -133,7 +133,7 @@ async function setupMcpClient(client: SupportedMcpClient): Promise<void> {
 async function setupDetectedMcpClients(): Promise<void> {
   const clients = detectSupportedMcpClients();
   if (clients.length === 0) {
-    const server = buildUmbraMcpServer(process.cwd());
+    const server = buildGlobalUmbraMcpServer();
     log.sys('No verified local MCP client was detected. Copy this standard stdio definition into your client:');
     console.log(JSON.stringify({ mcpServers: { umbra: server } }, null, 2));
     return;
@@ -462,7 +462,7 @@ authProgram
 
 const setupProgram = program
   .command('setup')
-  .description('Configure optional local integrations for this project');
+  .description('Configure optional Umbra integrations');
 
 setupProgram
   .command('langsmith')
@@ -471,17 +471,17 @@ setupProgram
 
 setupProgram
   .command('mcp')
-  .description('Detect and optionally configure verified local MCP clients for this repository')
+  .description('Configure verified MCP clients once for every project you open')
   .action(setupDetectedMcpClients);
 
 setupProgram
   .command('codex')
-  .description('Optionally configure the current repository as a Codex MCP server')
+  .description('Optionally configure global Codex MCP project activation')
   .action(async () => setupMcpClient('codex'));
 
 setupProgram
   .command('claude')
-  .description('Optionally configure the current repository as a Claude MCP server')
+  .description('Optionally configure global Claude MCP project activation')
   .action(async () => setupMcpClient('claude'));
 
 program
@@ -570,18 +570,28 @@ program
 
 program
   .command("mcp")
-  .description("Serve this repository's read-only knowledge to any MCP client over stdio")
-  .requiredOption("-r, --root <path>", "Repository to serve. Fixed at launch; no tool can change it")
+  .description("Serve one project's read-only knowledge to any MCP client over stdio")
+  .option("-r, --root <path>", "Repository to serve. Fixed at launch; no tool can change it")
+  .option("--auto-root", "Resolve the active client project before pinning the server root")
   .option("-e, --embeddings <provider>", "Embedding provider for semantic search: vertex | ollama")
   .option("--no-index", "Do not warm the semantic index at launch")
-  .action(async (options: { root: string; embeddings?: string; index?: boolean }) => {
+  .action(async (options: { root?: string; autoRoot?: boolean; embeddings?: string; index?: boolean }) => {
     // Nothing in this handler may write to stdout: it carries JSON-RPC, and a
     // single stray byte corrupts the connection before the handshake completes
     // (ADR-024, constraint 4). `startMcpServer` redirects the log sink to
     // stderr on its first line; every diagnostic below goes there too.
     try {
+      if (options.root !== undefined && options.autoRoot === true) {
+        throw new Error('Choose exactly one root mode: --root <path> or --auto-root.');
+      }
+      if (options.root === undefined && options.autoRoot !== true) {
+        throw new Error('Choose a root: --root <path>, or --auto-root for a globally configured client.');
+      }
+      const root = options.autoRoot === true
+        ? resolveMcpProjectRoot().rootDir
+        : options.root as string;
       await startMcpServer({
-        root: options.root,
+        root,
         version: readPackageVersion(),
         embeddings: options.embeddings,
         // commander maps `--no-index` to `index: false`.

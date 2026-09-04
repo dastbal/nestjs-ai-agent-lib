@@ -5,7 +5,7 @@
 | **Category** | Architecture · Packaging · Integration |
 | **Author** | David Balladares (decision) · Claude (record) |
 | **Date** | 2026-09-02 |
-| **Status** | ✅ **Accepted** — amended 8× 2026-09-04. Amendment 1 was **wrong** and is corrected in amendment 6 |
+| **Status** | ✅ **Accepted** — amended 9× 2026-09-04. Amendment 1 was **wrong** and is corrected in amendment 6 |
 
 ---
 
@@ -629,6 +629,59 @@ copyable standard definition instead of an unsafe guessed write.
 The normal command does not include `--no-index`: the server warms its one
 pinned root at startup. That preserves the original warm-index constraint while
 keeping `--no-index` available only for deliberate diagnostics.
+
+### 9 — 2026-09-04 · One user-scoped registration activates one local index per open project
+
+The project-pinned adapter in amendment 8 was safe, but it made a developer
+repeat setup for every repository. That is friction without an architectural
+benefit: `.umbra/` is already root-bound local state under ADR-018 and ADR-030,
+and an MCP process already exists for the lifetime of one client session.
+
+`umbra setup mcp`, `umbra setup codex`, and `umbra setup claude` now register a
+user-scoped command ending in `umbra mcp --auto-root`. It contains no saved
+project path. At process startup, `resolveMcpProjectRoot` in
+`src/presentation/mcp/project-root.ts` selects Claude Code's
+`CLAUDE_PROJECT_DIR` when present; otherwise it validates the server process
+working directory. The selected directory must exist and look like an
+Umbra-compatible project (`package.json`, `tsconfig.json`, `.git`, `src`, or an
+Umbra/workspace declaration), is canonicalised through `realpath`, and is then
+pinned by `startMcpServer` before any database, provider, or tool catalog is
+created.
+
+This is **not** a root argument exposed to MCP. A caller cannot switch projects
+through a tool or through natural-language instructions. If the client provides
+no valid project context, the server refuses to start and names the recovery:
+open the client from the repository, then reconnect. That is intentionally
+better than creating `.umbra/` beneath a home directory or a client installation
+directory.
+
+Claude Code's official user scope is configured and verified through `claude
+mcp add --scope user` / `claude mcp get`; on native Windows the adapter uses the
+documented `cmd /c npx` wrapper. Codex continues to use `codex mcp add` / `codex
+mcp get`; it launches from its active project working directory. A deliberate
+project-scoped entry may still use the existing explicit `--root <path>` form.
+
+### Verification evidence
+
+- `project-root.spec.ts` covers Claude precedence, working-directory launch,
+  invalid Claude context, and ambiguous-directory rejection.
+- `mcp-config.spec.ts` covers the global stdio definition and the Windows Claude
+  wrapper in addition to the pre-existing project-entry preservation cases.
+- Focused MCP suites: 20 tests passed. Full suite: 86 passed suites, 783 passed
+  tests, with one pre-existing skipped suite and five skipped tests.
+- `node node_modules/typescript/bin/tsc --noEmit --pretty false` and
+  `node node_modules/typescript/bin/tsc -p tsconfig.build.json --pretty false`
+  passed. A built `mcp --auto-root` launch from `C:\Windows` refused before
+  startup and named the required project markers.
+
+### Related files added by this amendment
+
+- `src/presentation/mcp/project-root.ts` — `resolveMcpProjectRoot` and project-marker validation.
+- `src/presentation/mcp/project-root.spec.ts` — trusted root resolution regressions.
+- `src/core/config/mcp-config.ts` — global server definition and verified Codex/Claude adapters.
+- `src/core/config/mcp-config.spec.ts` — global configuration command shapes.
+- `src/bin/cli.ts` — `mcp --auto-root` and global setup commands.
+- `README.md` — one-time global installation and per-project index lifecycle.
 
 ---
 

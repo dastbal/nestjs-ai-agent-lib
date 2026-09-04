@@ -33,6 +33,22 @@ export function buildUmbraMcpServer(rootDir: string): JsonObject {
   };
 }
 
+/**
+ * Returns a client-neutral stdio definition for a user-scoped MCP entry.
+ *
+ * The root is deliberately absent here. `umbra mcp --auto-root` resolves it
+ * from the trusted client launch context and pins it before publishing tools.
+ * This lets one user-level registration serve the project currently open in a
+ * client without making a shared database outside that project.
+ */
+export function buildGlobalUmbraMcpServer(): JsonObject {
+  return {
+    type: 'stdio',
+    command: 'npx',
+    args: ['-y', '@dastbal/umbra', 'mcp', '--auto-root'],
+  };
+}
+
 /** Detects only clients whose configuration contract Umbra verifies and owns. */
 export function detectSupportedMcpClients(): DetectedMcpClient[] {
   const candidates: readonly DetectedMcpClient[] = [
@@ -51,6 +67,35 @@ export function configureCodexMcp(rootDir: string): void {
     { stdio: 'pipe', windowsHide: true },
   );
   execFileSync('codex', ['mcp', 'get', 'umbra'], { stdio: 'pipe', windowsHide: true });
+}
+
+/** Configures and verifies one user-scoped Codex entry that resolves its root at launch. */
+export function configureGlobalCodexMcp(): void {
+  const server = buildGlobalUmbraMcpServer();
+  execFileSync(
+    'codex',
+    ['mcp', 'add', 'umbra', '--', server.command as string, ...(server.args as string[])],
+    { stdio: 'pipe', windowsHide: true },
+  );
+  execFileSync('codex', ['mcp', 'get', 'umbra'], { stdio: 'pipe', windowsHide: true });
+}
+
+/** Configures and verifies one user-scoped Claude Code entry that resolves its root at launch. */
+export function configureGlobalClaudeMcp(): void {
+  const command = globalClaudeMcpCommand();
+  execFileSync('claude', ['mcp', 'add', '--scope', 'user', 'umbra', '--', ...command], {
+    stdio: 'pipe',
+    windowsHide: true,
+  });
+  execFileSync('claude', ['mcp', 'get', 'umbra'], { stdio: 'pipe', windowsHide: true });
+}
+
+/** Returns the command passed to Claude Code for its user-scoped Umbra entry. */
+export function globalClaudeMcpCommand(platform: NodeJS.Platform = process.platform): string[] {
+  const server = buildGlobalUmbraMcpServer();
+  const command = [server.command as string, ...(server.args as string[])];
+  // Claude Code documents this wrapper for native Windows stdio servers using npx.
+  return platform === 'win32' ? ['cmd', '/c', ...command] : command;
 }
 
 /**
