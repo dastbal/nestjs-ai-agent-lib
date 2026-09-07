@@ -702,6 +702,54 @@ is worth.
 > binary, and amendment 2 records the shape it took: `ask_codebase` is published
 > when embeddings are available and withheld with a reason when they are not.
 > Three tools are free and credential-free either way.
+
+---
+
+### 10 — 2026-09-06 · A global MCP command has a self-contained runtime
+
+Amendment 6's optional-peer decision is superseded **for the published MCP
+adapter**. The measured package cost remains real, but an optional peer makes a
+clean `@dastbal/umbra` installation capable of accepting `umbra mcp` and then
+failing before its first MCP response. That failure is especially harmful for a
+user-scoped registration because the client has no project-local dependency
+step in which to repair it.
+
+`@modelcontextprotocol/sdk` is therefore a pinned production dependency in
+`package.json`, and the recovery message tells an operator to reinstall Umbra,
+not to assemble a second package manually. The SDK is still loaded lazily from
+its server subpaths so the adapter does not load its HTTP surface during a stdio
+startup.
+
+The user-scoped configuration emitted by
+`buildGlobalUmbraMcpServer` now runs `umbra mcp --auto-root`, not `npx`. The
+one-time documented flow is `npm install -g @dastbal/umbra` followed by
+`umbra setup mcp`, `umbra setup codex`, or `umbra setup claude`. This makes the
+server executable available before the client starts its MCP grace window.
+Project-local `umbra init` configuration remains an explicit `npx` flow; no
+install hook or consumer configuration write was introduced.
+
+### Verification evidence
+
+- `corepack npm@10.8.2 install --package-lock-only --ignore-scripts` completed
+  successfully and regenerated production dependency flags for the SDK tree.
+- `src/core/config/mcp-config.spec.ts` and
+  `src/presentation/mcp/sdk-server.spec.ts` — 16 tests passed.
+- `node node_modules/typescript/bin/tsc --noEmit --pretty false` — passed.
+- Tarball and clean-consumer smoke testing remain an explicit final release
+  gate; they are not claimed by this amendment.
+
+### Related files added by this amendment
+
+- `package.json` — required `@modelcontextprotocol/sdk` runtime dependency.
+- `package-lock.json` — production dependency closure for the SDK.
+- `src/core/config/mcp-config.ts` — `buildGlobalUmbraMcpServer` and
+  `globalClaudeMcpCommand`.
+- `src/core/config/mcp-config.spec.ts` — global executable command contracts.
+- `src/presentation/mcp/sdk-loader.ts` — `MCP_SDK_INSTALL_HINT`.
+- `src/presentation/mcp/sdk-server.spec.ts` — damaged-installation recovery
+  contract.
+- `src/presentation/mcp/start-mcp-server.ts` — required-runtime startup
+  diagnostic.
 >
 > **What is still open**, and is now the next step:
 >

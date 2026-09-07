@@ -46,17 +46,17 @@ describe('ensureUmbraMcpConfiguration', () => {
   it('builds a global entry that resolves a project at MCP launch rather than storing one root', () => {
     expect(buildGlobalUmbraMcpServer()).toEqual({
       type: 'stdio',
-      command: 'npx',
-      args: ['-y', '@dastbal/umbra', 'mcp', '--auto-root'],
+      command: 'umbra',
+      args: ['mcp', '--auto-root'],
     });
   });
 
-  it('uses Claude Code\'s documented cmd wrapper for native Windows npx servers', () => {
+  it('uses Claude Code\'s documented cmd wrapper for the global Windows CLI', () => {
     expect(globalClaudeMcpCommand('win32')).toEqual([
-      'cmd', '/c', 'npx', '-y', '@dastbal/umbra', 'mcp', '--auto-root',
+      'cmd', '/c', 'umbra', 'mcp', '--auto-root',
     ]);
     expect(globalClaudeMcpCommand('linux')).toEqual([
-      'npx', '-y', '@dastbal/umbra', 'mcp', '--auto-root',
+      'umbra', 'mcp', '--auto-root',
     ]);
   });
 

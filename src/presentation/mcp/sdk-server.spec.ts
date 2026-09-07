@@ -225,16 +225,14 @@ describe('MCP SDK loader', () => {
     expect(load.available).toBe(true);
   });
 
-  it('names the install command when it cannot load', () => {
+  it('names the Umbra reinstall command when its required SDK cannot load', () => {
     // Exercised through the shape rather than by uninstalling the package: the
     // contract that matters is that the reason and the fix travel together.
     const { MCP_SDK_INSTALL_HINT } = require('./sdk-loader') as {
       MCP_SDK_INSTALL_HINT: string;
     };
 
-    expect(MCP_SDK_INSTALL_HINT).toContain('npm i @modelcontextprotocol/sdk');
-    // A global CLI install cannot easily gain a peer dependency, so the hint
-    // has to cover that case explicitly.
-    expect(MCP_SDK_INSTALL_HINT).toContain('npm i -g');
+    expect(MCP_SDK_INSTALL_HINT).toContain('npm i @dastbal/umbra');
+    expect(MCP_SDK_INSTALL_HINT).not.toContain('@modelcontextprotocol/sdk');
   });
 });

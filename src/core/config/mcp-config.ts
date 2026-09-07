@@ -44,8 +44,8 @@ export function buildUmbraMcpServer(rootDir: string): JsonObject {
 export function buildGlobalUmbraMcpServer(): JsonObject {
   return {
     type: 'stdio',
-    command: 'npx',
-    args: ['-y', '@dastbal/umbra', 'mcp', '--auto-root'],
+    command: 'umbra',
+    args: ['mcp', '--auto-root'],
   };
 }
 
@@ -94,7 +94,7 @@ export function configureGlobalClaudeMcp(): void {
 export function globalClaudeMcpCommand(platform: NodeJS.Platform = process.platform): string[] {
   const server = buildGlobalUmbraMcpServer();
   const command = [server.command as string, ...(server.args as string[])];
-  // Claude Code documents this wrapper for native Windows stdio servers using npx.
+  // Claude Code documents this wrapper for native Windows stdio servers.
   return platform === 'win32' ? ['cmd', '/c', ...command] : command;
 }
 

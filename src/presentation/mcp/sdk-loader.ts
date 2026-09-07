@@ -1,17 +1,12 @@
 /**
- * Loads the official MCP SDK, which is an **optional** peer dependency.
+ * Loads the official MCP SDK, which is a required runtime dependency.
  *
- * ## Why optional rather than a plain dependency
+ * ## Why this is a plain dependency
  *
- * The SDK is 5.7 MB and pulls in roughly 6.9 MB more — `hono`, `ajv`, `jose`,
- * `express`, `cors`, `eventsource` — seventeen packages, into a library that
- * declares twenty direct dependencies in total. A consumer who installs
- * `@dastbal/umbra` for its NestJS module or its agent factory should not pay
- * 12 MB for a protocol they never speak.
- *
- * `peerDependencies` + `peerDependenciesMeta.optional` rather than
- * `optionalDependencies`, because `optionalDependencies` **installs** and the
- * point is that the consumer chooses.
+ * The SDK adds a meaningful amount of transitive code, but MCP is a public
+ * presentation adapter with a CLI entry point. A package that advertises
+ * `umbra mcp` must carry the protocol implementation in a clean installation;
+ * otherwise a global server can fail before its handshake.
  *
  * ## Why the SDK at all, after shipping a hand-written transport
  *
@@ -49,8 +44,7 @@ export interface McpSdk {
  * The subset of `McpServer` this adapter calls.
  *
  * Declared structurally rather than imported as a type, so `src/` compiles and
- * type-checks with the SDK absent. Importing its types would make an optional
- * dependency mandatory at build time, which defeats the point.
+ * type-checks without coupling application types to SDK internals.
  */
 export interface McpServerLike {
   registerTool(
@@ -87,19 +81,17 @@ export type McpSdkLoad =
   | { readonly available: true; readonly sdk: McpSdk }
   | { readonly available: false; readonly reason: string; readonly instruction: string };
 
-/** What to tell an operator who does not have the SDK installed. */
+/** What to tell an operator whose package installation is damaged. */
 export const MCP_SDK_INSTALL_HINT =
-  'The MCP server needs @modelcontextprotocol/sdk, which Umbra declares as an optional peer ' +
-  'dependency so that consumers who never speak MCP do not download it.\n' +
-  '  Local install:  npm i @modelcontextprotocol/sdk\n' +
-  '  Global install: npm i -g @dastbal/umbra @modelcontextprotocol/sdk\n';
+  'The MCP runtime dependency is missing from this Umbra installation. Reinstall Umbra:\n' +
+  '  Local install:  npm i @dastbal/umbra\n' +
+  '  Global install: npm i -g @dastbal/umbra\n';
 
 /**
  * Attempts to load the SDK.
  *
- * Never throws: a missing optional dependency is a fact to report with the
- * command that fixes it, not a stack trace. A degraded mode that does not
- * explain itself is worse than a required dependency.
+ * Never throws: a damaged installation is a fact to report with the command
+ * that fixes it, not a module-resolution stack trace.
  *
  * @returns The SDK, or the reason it is unavailable plus how to install it.
  */

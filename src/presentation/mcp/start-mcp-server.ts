@@ -23,9 +23,8 @@ import { buildSdkServer } from './sdk-server';
  *    print. `stdout` carries JSON-RPC, and one stray byte corrupts the
  *    connection before the handshake completes — silently, from the client's
  *    side (ADR-024, constraint 4).
- * 2. **Load the SDK.** An optional peer dependency, so its absence is reported
- *    with the install command before any work is done for a server that cannot
- *    start.
+ * 2. **Load the SDK.** A required runtime dependency; an absent SDK signals a
+ *    damaged installation and is reported before server work starts.
  * 3. **Pin the root.** Before any subsystem touches the database, because
  *    `AgentDB` caches its connection on first use and fixes the workspace for
  *    the life of the process.
@@ -63,11 +62,9 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<vo
   // 1. stdout belongs to the protocol from this line onward.
   setLogSink((line) => process.stderr.write(`${line}\n`));
 
-  // 2. The SDK is an optional peer dependency, so its absence is a normal
-  //    outcome that has to be explained with the command that fixes it — not a
-  //    module-resolution stack trace. Checked before any work is done, because
-  //    warming an index for a server that cannot start wastes the operator's
-  //    time and, on Vertex, their money.
+  // 2. An absent SDK signals a damaged installation. Explain how to repair it
+  //    before doing any work, because warming an index for a server that cannot
+  //    start wastes the operator's time and, on Vertex, their money.
   const load = loadMcpSdk();
   if (!load.available) {
     report(`cannot start: ${load.reason}`);
