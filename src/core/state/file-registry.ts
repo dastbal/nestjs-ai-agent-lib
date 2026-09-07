@@ -10,6 +10,8 @@ export interface FileRecord {
   hash: string;
   last_indexed: number;
   skeleton_signature: string | null;
+  index_state: 'indexed' | 'skipped';
+  skip_reason: string | null;
 }
 
 /**

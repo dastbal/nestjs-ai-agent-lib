@@ -15,6 +15,7 @@ import {
   VectorExtensionStatus,
 } from './vector-extension';
 import { ensureLexicalIndex } from '../rag/lexical-index';
+import { ensureIndexLeaseSchema } from '../rag/index-run-lease';
 import { ensureRetrievalMemory } from '../rag/retrieval-memory';
 import { enrichExistingTSDoc } from '../rag/tsdoc-enrichment';
 
@@ -108,7 +109,9 @@ export class AgentDB {
         path TEXT PRIMARY KEY,           -- Absolute or relative path (Unique ID)
         hash TEXT NOT NULL,              -- MD5 checksum of the full content
         last_indexed INTEGER NOT NULL,   -- Timestamp (Date.now())
-        skeleton_signature TEXT          -- JSON String of the file structure (Class/Methods signatures)
+        skeleton_signature TEXT,         -- JSON String of the file structure (Class/Methods signatures)
+        index_state TEXT NOT NULL DEFAULT 'indexed', -- 'indexed' | 'skipped'
+        skip_reason TEXT                 -- Intentional omission, never an embedding failure
       )
     `,
     ).run();
@@ -151,6 +154,8 @@ export class AgentDB {
     db.prepare(
       `CREATE INDEX IF NOT EXISTS idx_chunks_file ON code_chunks(file_path)`,
     ).run();
+
+    this.migrateFileRegistryOutcomes();
 
     // Existing embeddings remain valid: this writes only documentation metadata
     // for chunks that can be matched unambiguously to the current source AST.
@@ -208,6 +213,10 @@ export class AgentDB {
          ON chunk_vectors(provider, model)`,
     ).run();
 
+    // One root owns one writer at a time, even when two MCP clients start the
+    // same global Umbra command concurrently.
+    ensureIndexLeaseSchema(db);
+
     this.migrateEmbeddingColumns();
     this.migrateVectorsToBlobRows();
   }
@@ -250,6 +259,21 @@ export class AgentDB {
     for (const column of EMBEDDING_VECTOR_COLUMNS) {
       if (existing.has(column)) continue;
       db.prepare(`ALTER TABLE code_chunks ADD COLUMN ${column} TEXT`).run();
+    }
+  }
+
+  /** Adds explicit index outcomes without rewriting existing registry rows. */
+  private static migrateFileRegistryOutcomes(): void {
+    const db = this.instance;
+    const columns = new Set(
+      (db.prepare(`PRAGMA table_info(file_registry)`).all() as { name: string }[])
+        .map((column) => column.name),
+    );
+    if (!columns.has('index_state')) {
+      db.prepare(`ALTER TABLE file_registry ADD COLUMN index_state TEXT NOT NULL DEFAULT 'indexed'`).run();
+    }
+    if (!columns.has('skip_reason')) {
+      db.prepare(`ALTER TABLE file_registry ADD COLUMN skip_reason TEXT`).run();
     }
   }
 

@@ -53,6 +53,7 @@ import { IndexerService } from '../core/rag/indexer';
 import { resolveEmbeddings } from '../core/rag/embeddings/embeddings-resolver';
 import { probeEmbeddings } from '../core/rag/embeddings/embeddings-availability';
 import { formatIndexIntegrity, inspectIndexIntegrity } from '../core/rag/index-integrity';
+import { readIndexStamp } from '../core/rag/index-stamp';
 
 const program = new Command();
 suppressLangSmithTransportLogs();
@@ -418,7 +419,13 @@ program
     }
 
     if (options.index) {
-      const identity = resolveEmbeddings().port.identity;
+      // Prefer the persisted identity so this inspection cannot be confused by
+      // a later config change. Resolving a fallback only constructs local
+      // configuration; neither path calls an embedding provider.
+      const stamp = readIndexStamp(process.cwd());
+      const identity = stamp === undefined
+        ? resolveEmbeddings().port.identity
+        : { provider: stamp.provider, model: stamp.model };
       const report = inspectIndexIntegrity(process.cwd(), identity);
       console.log(formatIndexIntegrity(report));
       checks.push({ name: 'Semantic index coverage', passed: report.healthy });

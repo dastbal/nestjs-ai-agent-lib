@@ -148,9 +148,16 @@ async function warmIndexInBackground(
     lifecycle.phase = 'indexing';
     lifecycle.message = `Indexing with ${identity.provider}/${identity.model}.`;
     IndexerService.silent = false;
-    await new IndexerService(selection.port, (progress) => {
+    const result = await new IndexerService(selection.port, (progress) => {
       lifecycle.message = progress;
     }).indexProject();
+
+    if (result.disposition === 'already-running') {
+      lifecycle.phase = 'indexing';
+      lifecycle.message = 'Another Umbra process owns this root index lease; waiting for its durable coverage.';
+      report(lifecycle.message);
+      return;
+    }
 
     if (hasDurableCoverage(rootDir, identity.provider, identity.model)) {
       lifecycle.phase = 'ready';

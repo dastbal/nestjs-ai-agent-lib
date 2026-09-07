@@ -312,6 +312,38 @@ established before the directory is created. Discovery rules for source roots
 are unchanged: a declared monorepo still contributes many source projects to
 that one root-owned workspace.
 
+## Amendment — 2026-09-06 · A complete index is durable coverage, not a finished loop
+
+One source file now has one explicit durable outcome in `file_registry`:
+`indexed` after its chunks, active `(provider, model)` vector rows, and
+dependency edges commit together; or `skipped` with a reason only when its
+content is intentionally empty or whitespace. A nonempty source file that
+produces zero chunks is not recorded as fresh. Provider failures, malformed
+embedding batches, and interrupted writes leave the prior hash (or no row), so
+the next index run discovers and retries the path.
+
+`index_lease` is a SQLite single-writer lease with a heartbeat. A second MCP
+process serving the same root does not duplicate embeddings; it reports that a
+live owner is warming the shared index. A stale lease can be recovered safely,
+and release deletes only the owning row.
+
+`umbra doctor --index`, `get_index_status`, and `umbra://index-status` inspect
+the same durable evidence without calling an embedding provider: declared
+source coverage, file outcomes, chunks, vector identities and dimensions,
+missing vectors, zero-chunk indexed files, stale hashes, stamp consistency, and
+the lease. A `complete` stamp is healthy only when those facts agree.
+
+### Verification evidence
+
+- `indexer.spec.ts` covers a failed provider call, nonempty zero-chunk input,
+  and intentional empty-source omission; none can become a false fresh file.
+- `index-run-lease.spec.ts` covers one live writer, heartbeat, stale recovery,
+  and ownership-safe release.
+- `index-integrity.spec.ts` covers selected-provider gaps, chunkless files,
+  stale source content, and absent databases.
+- Focused index/MCP suites: 14 tests passed. `tsc --noEmit` and
+  `git diff --check` passed.
+
 ## Related files
 
 - `src/core/config/workspace-discovery.ts` — proposed `WorkspaceDiscoveryService`.
