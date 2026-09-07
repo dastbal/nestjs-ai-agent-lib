@@ -13,6 +13,77 @@ record the decision as an ADR.
 
 ---
 
+## Long-context Ollama embedding profiles
+
+> Deferred 2026-09-03 after an oversized `nomic-embed-text` input exposed its
+> 2K context limit. The safe chunk-fragment guard shipped first.
+
+### The idea
+
+Evaluate `qwen3-embedding:0.6b` as an explicit optional Ollama model for code
+retrieval. Its published 32K context can reduce fragmentation without changing
+the portable hybrid-retrieval policy.
+
+### What is actually missing
+
+Umbra accepts an Ollama model override but its adapter currently declares the
+default model's dimensions. Changing the model name alone could stamp an
+incorrect identity even though `chunk_vectors` correctly separates rows by
+provider and model.
+
+### The mechanism to reuse
+
+`EmbeddingsIdentity`, `chunk_vectors.dimensions`, provider backfill and the
+fixed-corpus audit already make a model experiment isolated and reversible.
+`splitChunksForEmbedding` guarantees that a model change is not required merely
+to avoid an oversized input.
+
+### Plan
+
+1. Pull the candidate only with operator approval and probe one local vector to
+   record its actual dimensions and context behaviour.
+2. Add a named model profile; never infer dimensions from a model string.
+3. Build its rows beside `nomic-embed-text`, then benchmark against the fixed
+   corpus. Do not promote it for context length, disk use or latency alone.
+4. Keep the remaining ideation candidates — pressure-map telemetry, AST symbol
+   cards, FTS-only fallback and a semantic-opt-in default — deferred until a
+   measured retrieval problem justifies them.
+
+---
+
+## Markdown documentation chunks for retrieval
+
+> Deferred 2026-09-03 while implementing ADR-029. David chose TSDoc-only
+> enrichment for the current retrieval iteration.
+
+### The idea
+
+Index curated project documentation (`README.md` and selected `docs/**/*.md`)
+as document chunks with heading metadata, separate from code chunks. A returned
+document would be labelled as documentation rather than presented as source
+code.
+
+### What is actually missing
+
+`IndexerService#getAllFiles` currently indexes only non-test TypeScript under
+`src/`. TSDoc now describes a class or method, but it cannot answer a project
+workflow documented only in Markdown.
+
+### The mechanism to reuse
+
+`code_chunks`, FTS5 and `RetrieverService` already support typed chunks and
+rank fusion. A document chunker would need its own path allowlist and heading
+parser; it must not append every README body to every TypeScript chunk.
+
+### Plan
+
+Define the documentation allowlist and result labelling first. Then add a
+separate document chunk type, test that generated notes and dependency READMEs
+stay excluded, and benchmark it against source-only retrieval before changing
+the default corpus.
+
+---
+
 ## `ask_human` with multiple choice
 
 > Recorded 2026-08-26, branch `2.0.0`. Deferred by David in the session that
@@ -130,6 +201,25 @@ exercised, because the tool was never callable. Treat that limit as unproven.
 ---
 
 ## Harness tool exclusions never reach the subagents
+
+> **Closed 2026-08-28** by
+> [ADR-023](./adr/ADR-023-interlocking-triage-readback-and-balanced-books.md).
+> Kept rather than deleted, because the reasoning below is what a future reader
+> needs before handing subagent construction back to a library.
+>
+> The fix was not the one planned here. Step 2 expected a per-subagent exclusion
+> middleware; what happened instead is that this project stopped letting
+> `deepagents` build the graphs at all. `subagent-registry.ts` compiles the three
+> delegates from the same specifications that already described them, so **a
+> delegate holds exactly the tools its specification declares** and the list is
+> no longer assembled in a second, unverified place.
+>
+> That was not done for this defect — it was forced by ADR-023, whose delegation
+> tool carries the order in its schema and therefore has to own its dispatch.
+> Closing this was the consequence, which is worth noting: the entry sat open for
+> two days as a defect worth fixing, and was closed as a side effect of something
+> else. Step 3 of the plan below shipped separately: the contract test now covers
+> all three subagent prompts.
 
 > Recorded 2026-08-26, branch `2.0.0`. Found by the first `umbra orchestrate` run
 > that got past the delegation guard (see the amendment to
@@ -735,3 +825,489 @@ Compare the zod schemas of `listFilesTool` and `safeReadFileTool` in
 `src/core/tools/file-tools.ts`. The likely difference is a single-argument
 schema being collapsed by deepagents into an `input` envelope, in which case the
 fix is the schema shape, not the tool.
+
+---
+
+## Rendering the model's reasoning, when the operator asks for it
+
+> Recorded 2026-08-28, branch `2.1.3`. Surfaced by the ADR-006 amendment that
+> stopped the reasoning leaking into the answer. Deferred because it is a
+> feature with a UI decision inside it, not the defect that was being fixed.
+
+### The idea
+
+`Show the model's reasoning` should actually show it — visually separated from
+the answer, the way a thinking block reads in a chat client: dimmed, boxed, and
+skippable.
+
+### What is actually true today
+
+No provider's reasoning reaches the screen, whatever the operator chooses:
+
+| Model family | What Umbra sends | What the CLI does |
+|---|---|---|
+| Claude 5 (`controllable`) | `thinking: { type: 'adaptive', display: 'summarized' }` when the toggle is on | hides it — `readVisibleText` drops `thinking` blocks |
+| Claude 4.5 (`forced-on`) | thinking budget, reasoning always returned | hides it |
+| Gemini 2.5 (`forced-on`) | thinking budget, `includeThoughts` derived by the library | stripped in `VertexChatAdapter._generate` |
+| Gemini 3.x (`unavailable`) | `thinkingLevel`, no thoughts returned | nothing to hide |
+
+So the `controllable` toggle changes the request and nothing else. It is
+**billed and discarded**. The menu now says exactly that rather than implying a
+display — see `DISPLAY_HINTS` in `src/presentation/cli/model-menu.ts` — because
+this repository's own rule, written in `reasoning-profile.ts`, is that a switch
+which silently does nothing is worse than one that admits what it cannot do.
+
+### The mechanism to reuse
+
+Everything needed already exists and is verified:
+
+- `readVisibleText` (`src/core/llm/visible-text.ts`) already **identifies**
+  reasoning blocks across all three provider spellings. It discards them; the
+  feature needs it to return them separately instead — a second return value,
+  not a second classifier.
+- `VertexChatAdapter._generate` already splits the two halves before the Vertex
+  transport fuses them into one string. It emits the visible half; the reasoning
+  half is right there beside it.
+- `StreamRenderer` already owns transient, styled, non-answer output — the tool
+  box and the wait indicator prove the pattern.
+
+### The plan
+
+1. `readVisibleText` returns `{ visible, reasoning }` rather than a string.
+   Every current caller reads `.visible` and behaves exactly as it does now.
+2. `StreamRenderer.streamReasoning(text)` renders the reasoning half dimmed and
+   clearly outside the answer. This is the actual design decision, and it is why
+   this is deferred: inline dim text, a collapsible box, and a `/thinking` pager
+   are three different products.
+3. The CLI passes the reasoning half only when
+   `describeReasoning(model).display === 'controllable'` **and**
+   `AGENT_REASONING_DISPLAY` is on. `forced-on` stays hidden: the operator did
+   not ask, and Anthropic's unsummarized thinking is long.
+4. `ReasoningDisplaySupport` then means what it says again, and ADR-016's
+   `forced-on` row gets an amendment noting that the library limitation it
+   describes is about the *request*, never about the display.
+
+### Why it was not done now
+
+The session was scoped to a rendering defect: the model's private deliberation
+was reaching the operator as if it were the reply. Adding a deliberate way to
+show that same text, in the same session, is how a fix turns into a feature
+nobody reviewed.
+
+---
+
+## The middleware that threw `undefined`
+
+> Recorded 2026-08-28, branch `2.1.3`. Open defect, **not** a design choice:
+> deferred because it could not be reproduced, not because it was judged not
+> worth fixing.
+
+### What was seen
+
+A `umbra deep` turn died immediately, before any output:
+
+```
+✗ Error
+└─ Cannot read properties of undefined (reading 'message')
+   at MiddlewareError.wrap (…/langchain/dist/agents/errors.cjs:69:10)
+```
+
+### What is known
+
+`MiddlewareError` is LangChain's wrapper for anything a middleware throws. It
+copies the wrapped error's message onto itself (`errors.cjs`:54) and keeps the
+original in `cause` (`errors.cjs`:57). So:
+
+- The message shown **is the original's**, repeated by the wrapper.
+- The frame shown is **the wrapper's**, not the failure's.
+- Something inside a middleware read `.message` on `undefined`.
+
+The four hooks this repository owns are `wrapToolCall` in
+`orchestration-guard.middleware.ts`, `iteration-budget.middleware.ts` and
+`delegation/subagent-budget.middleware.ts`, plus `beforeAgent` in
+`iteration-budget.middleware.ts`. None of them reads `.message` on a value that
+can be undefined by inspection, so the read is either in a helper they call or
+in a code path only a specific failure reaches.
+
+### What already changed
+
+Nothing that fixes it. `describeErrorOrigin`
+(`src/presentation/cli/error-origin.ts`) now walks the `cause` chain and prints
+the deepest frame, so **the next occurrence will name the file and line
+itself**. That is the whole reason this can wait: the next report will be a
+diagnosis rather than a mystery.
+
+### The plan
+
+1. Wait for a recurrence and read the frame the CLI now prints.
+2. If it recurs without a usable frame, the fallback is to have the middleware
+   boundary catch, log, and rethrow — but that is a scaffold to remove
+   afterwards, not a fix, and it should not be built before step 1.
+
+### What must not be done
+
+Do not "fix" this by making the middleware boundary swallow a non-`Error`. It
+would silence the crash and destroy the only evidence, and the constitution's
+rule stands: a caught exception is handled or rethrown with context, never
+dropped.
+
+---
+
+## The question log as the index
+
+> Recorded 2026-09-02, branch `2.1.3`. Generated during the divergence phase
+> that preceded [ADR-024](./adr/ADR-024-umbra-as-a-read-only-mcp-server.md)'s v1
+> and deliberately not built: the server had to exist first, because it is the
+> only place four agents converge.
+
+### The idea
+
+Umbra now answers four clients — Claude Code, Codex, Antigravity, Gemini CLI —
+through `umbra mcp`. Record **what they ask**, not what they are told, and that
+log is the first dataset this project has ever had about which parts of a
+codebase are actually hard to understand.
+
+This is the shape that produced three of this repository's load-bearing ideas:
+`askrag`, `list_readmes` ([ADR-003](./adr/ADR-003-on-demand-readme-index.md)) and
+`list_adrs` ([ADR-004](./adr/ADR-004-on-demand-adr-index.md)). In each, the
+valuable artifact was not the answer but **the cheap index that made the answer
+findable**. Applied here, the questions themselves are the artifact.
+
+It is also the cheapest idea in this file: no model, no credentials, on the side
+of ADR-024 that is already deterministic.
+
+### What is broken today
+
+Nothing. This is an opportunity, not a defect — and the entry *An index of what
+the Researcher already asked* in this same file says why that matters: **an index
+that is not needed is a stale index waiting to mislead.** Read that entry before
+building this one; it is the same idea one layer out, and it carries the hazard
+analysis.
+
+### The mechanism to reuse — do not invent one
+
+- `src/presentation/mcp/umbra-mcp-server.ts` — `callTool` is the single choke
+  point every tool call passes through. One append there captures everything.
+- `.umbra/telemetry/` already exists as the convention for local JSONL
+  (`interactive-turns.jsonl`, ADR-008 / ADR-019).
+- `src/core/rag/index-stamp.ts` — the provenance pattern to copy: an identity, a
+  timestamp, and a status, written next to the thing it describes.
+
+### The hazard that decides whether this ships
+
+A log of questions is a log of what someone was working on, and `clientInfo` in
+the `initialize` handshake names which agent asked. That is mild on one
+operator's machine and is **not** mild in a shared repository: it would become a
+record of who investigated what, when. Any implementation must decide, before
+writing a line, whether the log is machine-local and gitignored — like the
+telemetry it would sit beside — or versioned. ADR-018's amendment reversed a
+"stealth" rule for *decisions*; questions are not decisions.
+
+### The plan
+
+1. Append `{ tool, arguments, timestamp, clientInfo }` from `callTool` to
+   `.umbra/telemetry/mcp-questions.jsonl`. Gitignored, matching the existing
+   telemetry.
+2. Decide the aggregation unit. Per module path is the obvious one; per verbatim
+   question is too sparse to ever repeat.
+3. Only then decide whether it feeds anything — a `umbra metrics` section, or
+   `Mandate.knownContext`. **Do not build the consumer first**: this file already
+   holds one entry that exists because the injection point was built before the
+   data.
+
+---
+
+## A cost estimate before retrieval runs
+
+> Recorded 2026-09-02, branch `2.1.3`. Generated in the same divergence phase and
+> not built: it optimizes a path whose real problem is a full scan, and fixing
+> the scan may make the estimate pointless.
+
+### The idea
+
+A database query planner reports what a query will cost before running it.
+`ask_codebase` could do the same: answer *"this would compare 277 chunks across
+19 files, and embedding the query costs one Vertex call"* and let the caller
+decide whether to pay.
+
+Under `umbra mcp` the caller is another agent with its own budget
+([ADR-019](./adr/ADR-019-turn-cost-is-the-bound-not-tool-calls.md) made cost the
+bound for Umbra's own turns; this would extend the courtesy outward).
+
+### What is broken today
+
+`RetrieverService#query` reads every row with a vector and computes
+`cosineSimilarity` in JS over each one. Both
+[ADR-024](./adr/ADR-024-umbra-as-a-read-only-mcp-server.md) and
+[ADR-025](./adr/ADR-025-embeddings-are-chosen-not-assumed.md) record this as an
+accepted negative consequence, unfixed. On this repository it is 277 chunks and
+imperceptible; it is the bottleneck the moment a server answers several clients
+over a large repository.
+
+### The mechanism to reuse
+
+- `RetrieverService#populatedProviders` already runs a cheap `LIMIT 1` probe per
+  column — the same shape a count would take.
+- `readIndexStamp` already reports `filesIndexed` and `status` without touching
+  the vectors.
+- `src/core/observability/metrics.ts` for the pricing vocabulary.
+
+### The honest objection to it
+
+An estimate nobody reads is a tool call spent to save a tool call. And the
+underlying complaint is the scan, not the ignorance: an indexed vector search
+would make the cost small enough that estimating it is wasted work. **Fix the
+scan first, and see whether this still wants building.**
+
+### The plan
+
+1. Measure the scan on a large repository, so the problem is a number.
+2. Decide between an approximate index in SQLite and an estimate.
+3. Only if the estimate survives step 2: expose it as part of the provenance
+   header `ask_codebase` already emits, not as a second tool.
+
+---
+
+## Heresy: the read-only layer should not be a LangChain object
+
+> Recorded 2026-09-02, branch `2.1.3`. The mandatory heretical candidate of the
+> divergence phase that preceded ADR-024 v1. It contradicts an accepted record
+> and is written down for exactly that reason.
+
+### The ADR it contradicts
+
+[ADR-010](./adr/ADR-010-umbra-public-package-and-cli.md) — *one published
+package, one `umbra` binary*.
+
+### The idea
+
+`umbra mcp` publishes four read-only tools and instantiates no model. But
+importing `listAdrsTool` pulls in `@langchain/core`, because the tool **is** a
+LangChain `tool()` object — so the MCP server loads a chat framework in order to
+read a markdown index off disk.
+
+The heresy: split the read-only layer into its own package with no LangChain, no
+`deepagents`, no `langsmith`. The four capabilities become **plain functions** —
+`buildAdrIndex` already is one — and LangChain wraps them at the agent's edge
+rather than being the medium they are written in.
+
+### Why it is worth more than an install-size argument
+
+It is also the DDD violation the constitution names first: *the framework stays
+behind the port; never leak a framework type into Domain or Application.* Today
+the application layer does not merely touch LangChain, it is expressed in it.
+Fixing that and fixing the install weight are the same change, which is a strong
+signal the change is real.
+
+`src/presentation/mcp/tool-catalog.ts` already declares its own minimal
+`InvokableTool` interface to avoid depending on the framework's concrete types —
+a workaround that exists because of this defect, and a marker of where the seam
+would go.
+
+### What is broken today
+
+Nothing that fails. `umbra mcp` starts, answers, and was verified. This is a
+design objection, not a bug — which is why it is recorded rather than acted on.
+
+### The cost, which is the reason it was not chosen
+
+Two packages is two releases and two version numbers.
+[ADR-012](./adr/ADR-012-shipped-working-guides-and-consumer-decision-records.md)
+carries six amendments as standing evidence of what one artifact drifting from
+another costs in this project. ADR-010's single-package decision was not
+arbitrary.
+
+### The plan, if it is ever taken
+
+1. Extract the four bodies as pure functions in one commit that changes no
+   behaviour and adds no package. **Most of the value is here**, and it is
+   reversible.
+2. Have both the agent and the MCP adapter call those functions.
+3. Only then ask whether a second package is worth its release. If step 1 landed,
+   the answer may be no — and that is a fine outcome for a heresy.
+
+---
+
+## Indexed vector search — `vec0`, and the measurement that would justify it
+
+> Recorded 2026-09-02, branch `2.1.3`. Scoped and deliberately not built while
+> implementing [ADR-026](./adr/ADR-026-vectors-are-numbers-and-the-database-can-count.md):
+> the cheaper half of the fix removed enough of the cost that this became a
+> decision to make with numbers rather than a task to do now.
+
+### The idea
+
+`sqlite-vec` offers two modes. ADR-026 uses the scalar one —
+`vec_distance_cosine` in ordinary SQL — which moves the arithmetic into C and
+returns only the top *k* rows. It does **not** index anything: the scan is still
+linear, just with a much smaller constant and no marshalling.
+
+The other mode is `vec0` virtual tables, which give real KNN. That is the only
+option here that changes the *order* of the work rather than its constant.
+
+### What is broken today
+
+Nothing is broken, and that is the point of recording rather than doing. Measured
+on this repository, after ADR-026:
+
+```
+SQL  (vec_distance_cosine + ORDER BY + LIMIT 4)   0.35 ms   258 chunks
+extrapolated to 50,000 chunks                       69 ms
+```
+
+69 ms of scan on a 5,000-file project is not a problem worth a virtual table and
+its synchronisation. **The number that would justify this is a real measurement
+on a large repository, not an extrapolation** — every figure in ADR-026 is 258
+chunks plus arithmetic, and page-cache behaviour on a 146 MB table may not be
+linear at all.
+
+### The mechanism to reuse — do not invent one
+
+- `src/core/state/vector-extension.ts` already loads the extension, memoizes the
+  result, and reports a failure once. A `vec0` path needs no new loader.
+- `src/core/rag/retriever.ts` already has two ranking paths behind
+  `AgentDB.vectorSearch.available`, and `provenance.rankedIn` already reports
+  which ran. A third path fits the same seam.
+- `chunk_vectors` already stores `dimensions` per row, which is exactly the
+  value a `vec0` table needs to be created with.
+
+### The hazard that decides whether this ships
+
+`vec0` tables are created with a **fixed dimension count**, so they are one
+table per dimension — and ADR-026 deliberately made a model upgrade a distinct
+identity, which means dimensions can differ *within* one provider. So this is
+not one virtual table; it is a table per `(dimensions)`, kept in sync with
+`chunk_vectors` on every write, plus a rebuild path when it drifts.
+
+A stale KNN index returns confidently wrong neighbours, which is the same class
+of failure ADR-025 was written to prevent. **The synchronisation is the whole
+risk**, not the query.
+
+### The plan
+
+1. Measure retrieval on a repository with tens of thousands of chunks. Until
+   that number exists, this entry is speculation with good arithmetic.
+2. If it justifies the work: create one `vec0` table per dimension count, written
+   inside the same transaction as `chunk_vectors` so the two cannot diverge.
+3. Add a consistency check — row counts per identity, both tables — and treat a
+   mismatch as a reason to fall back to the scalar path, loudly. Never silently.
+4. Keep the scalar path. It is the reference the indexed path must agree with,
+   the same way `rankInJavaScript` is the reference for `rankInSql` today.
+
+---
+
+## Serving MCP over HTTP, and elicitation as the door to writes
+
+> Recorded 2026-09-02, branch `2.1.3`. Both became reachable the moment the
+> official SDK was adopted ([ADR-024](./adr/ADR-024-umbra-as-a-read-only-mcp-server.md)
+> amendment 6) and neither was built, because each is a decision rather than a
+> wiring task.
+
+### The two ideas
+
+**HTTP/streamable transport.** `umbra mcp` speaks stdio, which means one client
+per process, on the same machine. The SDK ships an HTTP transport. One Umbra
+process could then serve four agents, or a team, or a remote client.
+
+**Elicitation.** ADR-024 constraint 2 says writes are *technically* unavailable
+in MCP mode: `requestApproval` suspends by raising a LangGraph `interrupt()`,
+which exists only inside a graph run, so there is no channel to ask a human. The
+record already names the bridge — MCP elicitation — and the SDK implements it.
+That is the prerequisite for anything in this mode that changes a file.
+
+### What is broken today
+
+Nothing. Both are absent capabilities, not defects.
+
+### The hazard, and it is much larger for one than the other
+
+For HTTP: a stdio server is reachable only by the process that spawned it. An
+HTTP server is reachable by whatever can open a socket, and ADR-024's **entire**
+security argument reduces to constraint 3 — the root is pinned at launch and
+never read from a tool argument. That still holds over HTTP, but it stops being
+sufficient: authentication, binding address, and rate limiting become questions
+this project has never had to answer. `src/presentation/http/` already carries an
+`AgentHttpAuthorizer` port for exactly this shape of problem and is the precedent
+to read first.
+
+For elicitation: it turns a read-only server into one that can write, which
+ADR-024 recorded as *"a much larger decision than this record"*. It should not
+be built because it became easy.
+
+### The mechanism to reuse
+
+- `src/presentation/mcp/start-mcp-server.ts` — the startup order, the pinned
+  root and the pinned embedding provider are transport-independent.
+- `src/presentation/mcp/sdk-server.ts` — `buildSdkServer` already returns a
+  server that any SDK transport can be connected to. The transport is one line.
+- `src/presentation/http/agent-http.contracts.ts` — `AgentHttpAuthorizer` and
+  `AgentRunStore`, the ports the HTTP adapter already defines for host-supplied
+  authorization.
+- `docs/deferred-work.md` § *`ask_human` with multiple choice* — the analysis of
+  the interrupt/resume hazards, which apply unchanged.
+
+### The plan
+
+1. **HTTP first, and read-only only.** `umbra mcp --transport http --port N`,
+   bound to loopback by default, with the authorizer port wired before anything
+   is exposed beyond `127.0.0.1`.
+2. Decide authentication explicitly, in an ADR, before a non-loopback bind is
+   possible at all.
+3. **Elicitation separately, and last.** It needs its own record, because it
+   changes what this mode is allowed to do rather than how it is reached.
+
+---
+
+## Dual ESM/CJS publishing
+
+> Recorded 2026-09-02, branch `2.1.3`. Scoped, priced, and dropped by David in
+> the session that fixed `moduleResolution`: it is not needed for anything the
+> project does today, and the comparison below is recorded so nobody has to
+> price it twice.
+
+### The idea
+
+Publish `@dastbal/umbra` for both module systems, so a consumer can `import` it
+as well as `require` it.
+
+### What is broken today
+
+Nothing for this project. The package emits CommonJS, NestJS consumers are
+CommonJS, and the binary is CommonJS. This matters only when someone outside the
+team wants to consume the library from an ESM project.
+
+### What it would cost — the part worth not re-investigating
+
+Emitting ESM with `tsc` under Node resolution requires **explicit file
+extensions on every relative import** (`./foo.js`), and this codebase omits them
+throughout — hundreds of imports.
+
+| Option | Cost |
+|---|---|
+| `module: "esnext"` + `moduleResolution: "bundler"`, plus a post-emit script that appends `.js` to relative specifiers | ~40 lines of build script. **Does not touch source.** `tsc` keeps emitting the decorator metadata NestJS dependency injection needs |
+| `tsup` / esbuild | Simpler config, but **esbuild does not emit `emitDecoratorMetadata`**, which Nest DI relies on. Would additionally need the SWC plugin |
+| Add extensions to every source import | Hundreds of files touched for a packaging reason. The most invasive, and the noisiest in history |
+
+The first is the recommendation if this is ever taken. `bin.umbra` must keep
+pointing at the CommonJS output — it needs a shebang and `require` — and
+`main`/`types` must stay for older resolvers, with an `exports` map added
+alongside.
+
+### What was done instead, and why it was the valuable part
+
+`tsconfig.json` moved from `moduleResolution: "node"` (Node 10 resolution, which
+does not read `exports` maps) to `"Node16"`. One line, no output change, and it
+is what makes TypeScript see packages the way Node does. It immediately caught a
+real portability bug — `uuid@13` being ESM-only with no `require` condition,
+under an `engines: node >= 20` declaration — that had been invisible for as long
+as the old resolution was in place.
+
+### The plan, if it is ever taken
+
+1. Confirm someone actually needs it. A dual build with no ESM consumer is two
+   artifacts to keep in sync for nobody, and ADR-012's six amendments are the
+   standing evidence of what that costs here.
+2. Write the post-emit specifier script, and test it by `import`ing the built
+   ESM output from a scratch project — not by reading the emitted files.
+3. Keep the CommonJS path byte-identical to today's, so Nest consumers cannot be
+   affected by a change made for someone else.

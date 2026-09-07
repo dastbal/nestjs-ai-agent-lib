@@ -3,15 +3,16 @@ import { z } from "zod";
 import * as fs from 'fs';
 import * as path from 'path';
 import { log } from "./utils/logger";
-import { buildAdrIndex, formatAdrIndex } from "./adr-index";
+import { buildAdrIndex, formatAdrIndexForModule } from "./adr-index";
 import { AgentSecurityPolicy, resolveWorkspacePath } from '../security';
+import { runtimeRoot } from '../config/runtime-root';
 
 const securityPolicy = new AgentSecurityPolicy();
 
 export const listFilesTool = tool(
   async ({ dirPath }) => {
     try {
-      const rootDir = process.cwd();
+      const rootDir = runtimeRoot();
       const evaluation = securityPolicy.evaluate({ kind: 'read_file', rootDir, targetPath: dirPath || '.' });
       if (evaluation.decision !== 'allow') return `❌ DENIED: ${evaluation.reason}`;
       const targetDir = path.resolve(rootDir, dirPath || ".");
@@ -39,14 +40,14 @@ export const listFilesTool = tool(
  * ordinary coding tasks. The persistent catalog remains local to `.umbra/`.
  */
 export const listAdrsTool = tool(
-  async ({ refresh }) => {
+  async ({ refresh, module }) => {
     try {
-      const index = buildAdrIndex(process.cwd(), refresh);
+      const index = buildAdrIndex(runtimeRoot(), refresh);
       log.sys(`ADR catalog ${index.status}: ${index.entries.length} decisions`);
-      return formatAdrIndex(index);
+      return formatAdrIndexForModule(index, module);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      return `âŒ Error indexing ADR files: ${message}`;
+      return `❌ Error indexing ADR files: ${message}`;
     }
   },
   {
@@ -56,6 +57,7 @@ export const listAdrsTool = tool(
       "Use only when architecture history is relevant; then read the selected ADR with safe_read_file.",
     schema: z.object({
       refresh: z.boolean().optional().default(false).describe("Rebuild the local ADR catalog."),
+      module: z.string().min(1).optional().describe('Optional discovered ADR module to list.'),
     }),
   },
 );

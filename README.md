@@ -31,6 +31,11 @@ Vertex AI**, and local **Ollama** models.
 - [Agent Modes](#agent-modes)
   - [Deep Agent (`deep`)](#deep-agent-deep)
   - [Orchestrator (`orchestrate`)](#orchestrator-orchestrate)
+- [Umbra as an MCP server](#umbra-as-an-mcp-server--share-this-codebases-knowledge-with-any-agent)
+  - [What it publishes](#what-it-publishes)
+  - [Try it in this repository](#try-it-in-this-repository)
+  - [Use it on your own repository](#use-it-on-your-own-repository)
+  - [Semantic search without a Google account](#semantic-search-without-a-google-account)
 - [Architecture](#architecture)
 - [Core Concepts](#core-concepts)
   - [NestJS Integration](#nestjs-integration)
@@ -634,6 +639,258 @@ umbra orchestrate --session big-refactor
 *   **Researcher:** A read-only analyst. Uses tools like `ask_codebase` and `safe_read_file` to understand the project and generate structured plans.
 *   **Coder:** An implementation specialist. Uses `safe_write_file`, `run_tests`, and `run_integrity_check`. Writes `.spec.ts` files first, then implements the corresponding code. Self-corrects up to the configured `maxRetries` upon test failures.
 *   **Verifier:** A read-only quality gate. Runs tests and type-checks, then returns compact evidence and remaining issues.
+
+---
+
+## Umbra as an MCP server — share this codebase's knowledge with any agent
+
+`umbra mcp` publishes what Umbra knows about **one repository** to any Model
+Context Protocol client — Claude Code, Codex, Cursor, Gemini CLI — over stdio.
+It answers; the client thinks.
+
+There is **no model inside it**. It does not reason, build prompts, call a
+provider or run an agent loop: it receives a request and answers by running
+deterministic code. It cannot write files, run commands, or reach the network.
+
+Decided in [ADR-024](docs/adr/ADR-024-umbra-as-a-read-only-mcp-server.md).
+
+### What it publishes
+
+| Kind | Name | What it answers |
+|---|---|---|
+| Tool | `list_adrs` | *Why* is the code shaped this way — path, title, status of every decision record, without their bodies |
+| Tool | `query_dependency_graph` | *What breaks if I change this file* — inbound or outbound imports, from the AST |
+| Tool | `run_integrity_check` | `tsc --noEmit` over the served repository |
+| Tool | `ask_codebase` | Semantic search in natural language, with the index's provenance on every answer |
+| Resource | `umbra://adr-index` | The ADR catalog |
+| Resource | `umbra://index-status` | Which embedding provider built the index, when, and whether it is complete |
+| Prompt | one per `skills/*.md` | The working guides the package ships |
+
+Three of the four tools are free and need no credentials. `ask_codebase` embeds
+the query, so it is **published only when embeddings can actually answer** —
+otherwise it is withheld and `stderr` says why, with the command that fixes it.
+Advertising a tool that fails on first use is a defect, not a convenience.
+
+### Try it in this repository
+
+`.mcp.json` is committed, so a clone is already configured. You need two things:
+
+```bash
+npm install                            # includes the build toolchain
+npm i @modelcontextprotocol/sdk        # optional peer dependency, see below
+npm run build
+```
+
+Then start Claude Code in this directory. The first time, it asks you to approve
+the project-scoped server — that prompt exists so a repository you clone cannot
+launch processes without your consent. Verify with:
+
+```bash
+claude mcp list
+```
+
+`umbra` should read `✔ Connected`. Then ask any agent in that session
+*"list this project's ADRs using Umbra"*.
+
+To check it by hand, without a client:
+
+```bash
+node dist/bin/cli.js mcp --root .
+```
+
+It waits for a client and prints its startup to **stderr**:
+
+```
+[umbra mcp] umbra mcp — serving /path/to/repo
+[umbra mcp] embeddings: ollama/nomic-embed-text (from config)
+[umbra mcp] index ready
+[umbra mcp] publishing 4 tools: ask_codebase, list_adrs, query_dependency_graph, run_integrity_check
+```
+
+During a cold index it also prints per-file progress, percentage, embedding
+batch and elapsed time. An interactive `umbra deep` terminal repaints one
+concise status line instead of flooding the console; redirected output and MCP
+diagnostics retain complete lines. If Ollama is still loading or embedding after
+15 seconds, a heartbeat names the exact file and batch. MCP diagnostics always
+use `stderr`, never JSON-RPC `stdout`.
+
+**`publishing 4 tools` means it works.** `3` is not a failure: it means
+embeddings are unavailable, and the line above it says exactly why. Ctrl+C to
+stop.
+
+### Use it on your own repository
+
+Nothing to clone and nothing to install globally. In the repository you want
+served, run:
+
+```bash
+npx -y @dastbal/umbra@2.2.3 init
+```
+
+Choose **Configure MCP server** when prompted. Umbra detects verified local
+clients and always shows the absolute repository root and startup command before
+asking for confirmation. It changes nothing by default; `npm install` and
+package postinstall hooks never modify consumer configuration.
+
+Run the flow again at any time:
+
+```bash
+umbra setup mcp       # detect Codex and Claude
+umbra setup codex     # configure and verify Codex only
+umbra setup claude    # update only mcpServers.umbra in .mcp.json
+```
+
+Codex is configured through `codex mcp add` and verified with `codex mcp get
+umbra`; restart an existing Codex session afterwards. Claude keeps the additive
+project `.mcp.json` adapter. Other MCP clients receive a standard JSON definition
+to copy, rather than Umbra guessing their configuration format.
+
+The generated entry pins the current repository by its absolute path. If your
+team wants a portable, committed Claude Code configuration instead, create
+`.mcp.json` yourself with `${CLAUDE_PROJECT_DIR}`:
+
+```json
+{
+  "mcpServers": {
+    "umbra": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@dastbal/umbra", "mcp", "--root", "${CLAUDE_PROJECT_DIR}"]
+    }
+  }
+}
+```
+
+That is the whole setup. `npx -y` fetches and runs the package without
+installing it — the same shape every other MCP server is distributed in — and
+`${CLAUDE_PROJECT_DIR}` is expanded by Claude Code to the project root, so the
+file is portable and safe to commit for a team.
+
+The optional peer dependency has to be reachable too, so either add it to that
+project (`npm i @modelcontextprotocol/sdk`) or install both globally:
+
+```bash
+npm i -g @dastbal/umbra @modelcontextprotocol/sdk
+```
+
+with `"command": "umbra"` instead of `npx`.
+
+**Needs 2.2.0 or later.** Earlier published versions have no `mcp` subcommand at
+all.
+
+| Flag | Meaning |
+|---|---|
+| `--root <path>` | **Required.** The repository to serve. Fixed at launch; no tool argument can change it |
+| `--embeddings <vertex\|ollama>` | Provider for semantic search. Defaults to `.umbra/agent.config.json`, else `ollama` |
+| `--no-index` | Do not warm the semantic index at launch |
+
+After a first index, verify durable coverage without calling an embedding
+provider:
+
+```bash
+umbra doctor --index
+```
+
+It reports the root's `.umbra/memory.db`, registered files, chunks, vectors per
+provider/model, dimensions, and paths whose chunks have no vector. Vectors live
+in `chunk_vectors`, keyed by `(chunk_id, provider, model)`; `file_registry`
+alone only proves that a file was seen, not that it is searchable.
+
+### Monorepo discovery
+
+Umbra discovers TypeScript source from package `tsconfig.json` files and workspace
+declarations, not from a guessed root `src/`. It ignores dependency/build trees,
+indexes `.ts` and `.tsx`, and keeps all stored paths relative to the fixed
+`--root`. If a repository's declared source boundary needs an explicit override,
+commit an `umbra.json` at its root:
+
+```json
+{ "indexing": { "sources": ["apps/*/src/**/*.ts", "apps/web/features/**/*.tsx"] } }
+```
+
+`list_adrs` also discovers module catalogs such as `docs/payments/adr/`; its
+optional `module` argument filters the result. The `.umbra/` directory, including
+`memory.db`, is local root-bound cache state: it is safe to delete and should be
+gitignored. `umbra init` adds that ignore rule without rewriting existing rules.
+
+Prefer putting the provider in `.umbra/agent.config.json` rather than in
+`.mcp.json` — that file is machine-local and gitignored, so each person chooses
+without changing what the team shares:
+
+```json
+{ "rag": { "embeddings": "ollama" } }
+```
+
+### Semantic search without a Google account
+
+`ask_codebase` needs an embedding provider, and **the default is local, free and
+offline** ([ADR-027](docs/adr/ADR-027-the-default-is-the-one-that-costs-nothing.md)).
+One command and semantic search works with no cloud account:
+
+```bash
+ollama pull nomic-embed-text
+```
+
+**Google Vertex** is fully supported and one line away. It costs cents per query
+and needs Application Default Credentials:
+
+```bash
+umbra auth login
+```
+
+```json
+{ "rag": { "embeddings": "vertex" } }
+```
+
+in `.umbra/agent.config.json`, which is gitignored — so each person on a team
+chooses without changing what the repository shares. `UMBRA_EMBEDDINGS=vertex`
+and `--embeddings vertex` do the same thing for one run.
+
+### Choose the provider before indexing
+
+Inside an interactive CLI session, use `/model` and select **Embeddings**. The
+choice is stored only in `.umbra/agent.config.json`; it does not change your
+chat model and it does not start a billable rebuild by itself.
+
+For a one-off or scripted rebuild, choose the provider explicitly:
+
+```bash
+umbra index --embeddings ollama
+umbra index --embeddings vertex
+```
+
+The command checks the selected provider before writing vectors. It never
+substitutes Vertex for Ollama or vice versa, so a missing local model or Google
+credential is reported before any index is changed.
+
+Switching is reversible and never destroys the other index: each provider's
+vectors are stored under their own identity, so switching back requires no
+re-indexing, and querying an index built by the *other* provider raises an
+explicit error naming the fix rather than answering from the wrong vectors
+([ADR-025](docs/adr/ADR-025-embeddings-are-chosen-not-assumed.md),
+[ADR-026](docs/adr/ADR-026-vectors-are-numbers-and-the-database-can-count.md)).
+
+If no provider is available, `ask_codebase` is withheld and the other three
+tools are unaffected.
+
+> Upgrading from 2.1.x with a Vertex-built index and no `rag.embeddings` in your
+> config? The first query reports the mismatch and names both fixes: set
+> `vertex` in the config, or let it re-embed locally.
+
+### Why the SDK is a separate install
+
+`@modelcontextprotocol/sdk` is declared as an **optional peer dependency**. It
+is 5.7 MB plus roughly 6.9 MB of transitive packages, and someone who installs
+`@dastbal/umbra` for its NestJS module or its agent factory should not download
+a protocol they never speak. `umbra mcp` tells you the exact command if it is
+missing.
+
+### Removing it
+
+Delete the entry from `.mcp.json`. There is nothing else to undo: no daemon, no
+credentials handed out, no state outside the repository's own gitignored
+`.umbra/` directory.
+
 
 ---
 

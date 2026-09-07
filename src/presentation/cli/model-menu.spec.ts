@@ -1,5 +1,9 @@
 const mockSelectOutcome = jest.fn();
 const mockAskText = jest.fn();
+const mockConfirm = jest.fn();
+const mockSetConfiguredEmbeddingsProvider = jest.fn();
+const mockPinEmbeddingsProvider = jest.fn();
+const mockIndexProject = jest.fn();
 
 jest.mock('./interactive-select', () => ({
   isInteractive: () => true,
@@ -9,6 +13,26 @@ jest.mock('./interactive-select', () => ({
 jest.mock('./prompts', () => ({
   askNumber: jest.fn(),
   askText: mockAskText,
+  confirm: mockConfirm,
+}));
+
+jest.mock('../../core/rag/indexer', () => ({
+  IndexerService: jest.fn().mockImplementation(() => ({ indexProject: mockIndexProject })),
+}));
+
+jest.mock('../../core/config/agent-config-writer', () => ({
+  setConfiguredEmbeddingsProvider: mockSetConfiguredEmbeddingsProvider,
+}));
+
+jest.mock('../../core/rag/embeddings/embeddings-resolver', () => ({
+  resolveEmbeddings: () => ({
+    port: { identity: { provider: 'ollama', model: 'nomic-embed-text' } },
+  }),
+  pinEmbeddingsProvider: mockPinEmbeddingsProvider,
+}));
+
+jest.mock('../../core/rag/embeddings/embeddings-availability', () => ({
+  probeEmbeddings: jest.fn().mockResolvedValue({ available: true }),
 }));
 
 import { ModelSwitcher } from '../../core/config/model-switcher';
@@ -50,6 +74,12 @@ describe('showModelMenu Claude on Vertex', () => {
   beforeEach(() => {
     mockSelectOutcome.mockReset();
     mockAskText.mockReset();
+    mockConfirm.mockReset();
+    mockConfirm.mockResolvedValue(false);
+    mockIndexProject.mockReset();
+    mockSetConfiguredEmbeddingsProvider.mockReset();
+    mockSetConfiguredEmbeddingsProvider.mockReturnValue({ path: '.umbra/agent.config.json', saved: true });
+    mockPinEmbeddingsProvider.mockReset();
     delete process.env.GOOGLE_CLOUD_PROJECT;
     delete process.env.AGENT_REASONING;
     delete process.env.AGENT_REASONING_DISPLAY;
@@ -83,6 +113,7 @@ describe('showModelMenu Claude on Vertex', () => {
       'vertex-gemini',
       'vertex-anthropic',
       'ollama',
+      'embeddings',
       undefined, // the "configuration" separator carries no value
       'setup',
     ]);
@@ -125,6 +156,50 @@ describe('showModelMenu Claude on Vertex', () => {
     await showModelMenu('gemini-3.5-flash');
 
     expect(levelsAt(2)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+});
+
+describe('showModelMenu embeddings provider', () => {
+  beforeEach(() => {
+    mockSelectOutcome.mockReset();
+    mockConfirm.mockReset();
+    mockConfirm.mockResolvedValue(false);
+    mockIndexProject.mockReset();
+    mockSetConfiguredEmbeddingsProvider.mockReset();
+    mockSetConfiguredEmbeddingsProvider.mockReturnValue({ path: '.umbra/agent.config.json', saved: true });
+    mockPinEmbeddingsProvider.mockReset();
+    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('persists and pins a provider without hot-swapping the chat model', async () => {
+    mockSelectOutcome
+      .mockResolvedValueOnce({ status: 'selected', value: 'embeddings' })
+      .mockResolvedValueOnce({ status: 'selected', value: 'vertex' });
+
+    await expect(showModelMenu('gemini-3.5-flash')).resolves.toBeNull();
+
+    expect(choicesAt(1).map((choice) => choice.value)).toEqual(['ollama', 'vertex']);
+    expect(mockSetConfiguredEmbeddingsProvider).toHaveBeenCalledWith(process.cwd(), 'vertex');
+    expect(mockPinEmbeddingsProvider).toHaveBeenCalledWith('vertex');
+    expect(mockConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      question: expect.stringContaining('sends repository code to Vertex AI'),
+      defaultValue: false,
+    }));
+    expect(mockIndexProject).not.toHaveBeenCalled();
+  });
+
+  it('builds the selected provider only after explicit confirmation', async () => {
+    mockSelectOutcome
+      .mockResolvedValueOnce({ status: 'selected', value: 'embeddings' })
+      .mockResolvedValueOnce({ status: 'selected', value: 'vertex' });
+    mockConfirm.mockResolvedValue(true);
+    mockIndexProject.mockResolvedValue(undefined);
+
+    await expect(showModelMenu('gemini-3.5-flash')).resolves.toBeNull();
+
+    expect(mockIndexProject).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -230,7 +305,12 @@ describe('showModelMenu reasoning screen', () => {
     );
   });
 
-  it('marks the display row forced-on for the budget-based models', async () => {
+  // Corrected 2026-08-28 with the ADR-006 amendment. This row used to assert a
+  // filled box, on the understanding that a forced-on model's reasoning was
+  // always displayed. It is no longer printed by anyone, so a filled box would
+  // claim something the CLI does not do — the row stays unactionable, and the
+  // hint now says the reasoning is billed rather than shown.
+  it('marks the display row unactionable for the budget-based models', async () => {
     mockSelectOutcome
       .mockResolvedValueOnce({ status: 'selected', value: 'vertex-gemini' })
       .mockResolvedValueOnce({ status: 'selected', value: 'gemini-2.5-pro' })
@@ -242,8 +322,8 @@ describe('showModelMenu reasoning screen', () => {
       (row) => (row.value as { kind?: string } | undefined)?.kind === 'toggle-display',
     );
     expect(toggle?.disabled).toBe(true);
-    expect(toggle?.label).toContain('☑');
-    expect(toggle?.hint).toContain('cannot be turned off');
+    expect(toggle?.label).toContain('☐');
+    expect(toggle?.hint).toContain('not printed');
   });
 
   it('skips the reasoning screen for Ollama, which has no reasoning controls', async () => {

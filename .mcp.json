@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "umbra": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@dastbal/umbra",
+        "mcp",
+        "--root",
+        "C:\\Users\\BLUELABEL-PROGRAMMER\\Documents\\london\\London\\nestjs-ai-agent-lib"
+      ]
+    }
+  }
+}

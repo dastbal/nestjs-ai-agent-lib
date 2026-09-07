@@ -35,6 +35,10 @@
  */
 
 import { ModelSwitcher } from '../../core/config/model-switcher';
+import { setConfiguredEmbeddingsProvider } from '../../core/config/agent-config-writer';
+import { IndexerService } from '../../core/rag/indexer';
+import { resolveEmbeddings, pinEmbeddingsProvider } from '../../core/rag/embeddings/embeddings-resolver';
+import { probeEmbeddings } from '../../core/rag/embeddings/embeddings-availability';
 import {
   isVertexAnthropicModel,
   isGoogleCloudProjectId,
@@ -52,7 +56,7 @@ import {
 } from '../../core/config/reasoning-profile';
 import { colors, box } from './theme';
 import { isInteractive, selectOutcome, SelectChoice } from './interactive-select';
-import { askNumber as askNumberPrompt, askText } from './prompts';
+import { askNumber as askNumberPrompt, askText, confirm } from './prompts';
 import chalk from 'chalk';
 
 /**
@@ -141,7 +145,7 @@ export async function showModelMenu(
   // ── Step 1: Provider Selection ─────────────────────────────────────────────
   const isCurrentOllama = currentModel.startsWith('ollama:');
   const isCurrentClaude = isVertexAnthropicModel(currentModel);
-  const providers: SelectChoice<'vertex-gemini' | 'vertex-anthropic' | 'ollama' | 'setup'>[] = [
+  const providers: SelectChoice<'vertex-gemini' | 'vertex-anthropic' | 'ollama' | 'embeddings' | 'setup'>[] = [
     {
       // The distinguishing word leads each row. Both cloud providers share the
       // same Vertex AI transport, so starting both labels with it made them
@@ -159,6 +163,10 @@ export async function showModelMenu(
       label: '🦙  Ollama  (Local — free, no API key needed)',
       value: 'ollama',
       active: isCurrentOllama,
+    },
+    {
+      label: '🔎  Embeddings  (provider used to index and search code)',
+      value: 'embeddings',
     },
     { label: '── configuration ──', separator: true },
     {
@@ -178,6 +186,10 @@ export async function showModelMenu(
     return showSetupMenu(envFilePath);
   }
 
+  if (selectedProvider === 'embeddings') {
+    return showEmbeddingsMenu();
+  }
+
   if (selectedProvider === 'vertex-gemini') {
     return showVertexModelMenu(currentModel, envFilePath);
   } else if (selectedProvider === 'vertex-anthropic') {
@@ -185,6 +197,79 @@ export async function showModelMenu(
   } else {
     return showOllamaModelMenu(currentModel, envFilePath);
   }
+}
+
+/**
+ * Chooses and persists the provider that writes and reads semantic code
+ * vectors. This changes no chat model and offers an explicit, fail-closed
+ * confirmation before starting an index.
+ *
+ * @returns Always null because the current chat agent is unchanged.
+ */
+async function showEmbeddingsMenu(): Promise<null> {
+  const active = resolveEmbeddings().port.identity.provider;
+  const selected = await chooseFromList<'ollama' | 'vertex'>('Embeddings provider', [
+    {
+      label: '🦙  Ollama',
+      value: 'ollama',
+      hint: 'nomic-embed-text · local, free, offline',
+      active: active === 'ollama',
+    },
+    {
+      label: '☁️   Vertex',
+      value: 'vertex',
+      hint: 'text-embedding-004 · billable, needs Google credentials',
+      active: active === 'vertex',
+    },
+  ]);
+  if (selected === null) {
+    console.log(colors.muted('  Cancelled.\n'));
+    return null;
+  }
+
+  const saved = setConfiguredEmbeddingsProvider(process.cwd(), selected);
+  if (!saved.saved) {
+    console.log(colors.danger(`  ✗ Embeddings provider was not saved: ${saved.reason ?? 'unknown error'}\n`));
+    return null;
+  }
+
+  // The resolver is process-wide; pinning makes this selection observable by
+  // no-argument retrievers created later in this same CLI process.
+  pinEmbeddingsProvider(selected);
+  const selection = resolveEmbeddings();
+  const availability = await probeEmbeddings(selection.port);
+  console.log(colors.accent(`  ✓ Embeddings provider saved: ${selection.port.identity.provider}/${selection.port.identity.model}`));
+  if (!availability.available) {
+    console.log(colors.warning(`  ⚠️  Semantic indexing is unavailable: ${availability.reason ?? 'unknown reason'}`));
+    console.log(colors.muted(`  Run: umbra index --embeddings ${selected} once the provider is available.`));
+    console.log(colors.muted('  Existing vectors from the other provider are kept.\n'));
+    return null;
+  }
+
+  const destination = selected === 'vertex'
+    ? 'This sends repository code to Vertex AI and may incur charges. Build its index now?'
+    : 'Build the local Ollama index now?';
+  const shouldIndex = await confirm({
+    question: destination,
+    yesLabel: 'Build index now',
+    noLabel: 'Keep provider only',
+    defaultValue: false,
+  });
+  if (shouldIndex === true) {
+    try {
+      await new IndexerService(selection.port).indexProject();
+      console.log(colors.accent(`  ✓ ${selection.port.identity.provider} index is ready.\n`));
+      return null;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.log(colors.danger(`  ✗ Indexing failed: ${message}\n`));
+      return null;
+    }
+  }
+
+  console.log(colors.muted(`  Run: umbra index --embeddings ${selected} to build this provider's vectors.`));
+  console.log(colors.muted('  Existing vectors from the other provider are kept.\n'));
+  return null;
 }
 
 /**
@@ -346,25 +431,38 @@ const LEVEL_HINTS: Readonly<Record<ReasoningLevel, string>> = {
   max: 'correctness over cost',
 };
 
-/** Why the display row is or is not actionable, in the operator's words. */
+/**
+ * Why the display row is or is not actionable, in the operator's words.
+ *
+ * Corrected 2026-08-28. These read as they now behave, not as they were
+ * designed: since the ADR-006 amendment, no provider's reasoning is printed at
+ * all. The `controllable` toggle still changes the *request* — Anthropic is
+ * asked for summarized thinking — and the CLI does not yet render what comes
+ * back, which is recorded in `docs/deferred-work.md`. Saying so is the point:
+ * this module's own rule is that a switch which silently does nothing is worse
+ * than one that admits what it cannot do.
+ */
 const DISPLAY_HINTS: Readonly<Record<ReasoningDisplaySupport, string>> = {
-  controllable: 'visibility only — thinking is billed either way',
-  'forced-on': 'always shown once a level is set — cannot be turned off',
+  controllable: 'asks the provider for it — not printed yet; billed either way',
+  'forced-on': 'always generated and billed once a level is set — not printed',
   unavailable: 'not available for this model',
 };
 
 /**
  * Renders the display row's checkbox for each support state.
  *
- * A forced-on model shows a filled box the operator cannot clear, which is
- * honest about the state; an unavailable one shows an empty box it cannot fill.
+ * The box answers "is this reasoning shown to me?", so it is empty wherever
+ * nothing reaches the screen. A `forced-on` model held a filled box until
+ * 2026-08-28, on the understanding that its reasoning was always displayed;
+ * the ADR-006 amendment stops printing it, so a filled box would now be a
+ * claim the CLI does not honour. The hint carries why it cannot be filled.
  *
  * @param support - How much control Umbra has over showing reasoning.
  * @param showReasoning - The current toggle state, when it is controllable.
  * @returns The checkbox glyph to render.
  */
 function displayCheckbox(support: ReasoningDisplaySupport, showReasoning: boolean): string {
-  if (support === 'forced-on') return '☑';
+  if (support === 'forced-on') return '☐';
   if (support === 'unavailable') return '☐';
   return showReasoning ? '☑' : '☐';
 }

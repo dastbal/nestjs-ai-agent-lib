@@ -5,7 +5,17 @@ import {
   MethodDeclaration,
   ClassDeclaration,
 } from 'ts-morph';
-import { v4 as uuidv4 } from 'uuid';
+// Node's own UUID generator rather than the `uuid` package.
+//
+// `uuid@13` is ESM-only: its exports map has no `require` condition, so
+// `require('uuid')` from this CommonJS build works only on Node 22+, which
+// permits requiring an ES module. This package declares `engines: node >= 20`,
+// where the same call throws. The bug was invisible until `moduleResolution`
+// moved off Node 10 resolution, which does not read exports maps at all.
+//
+// `randomUUID` has been in `node:crypto` since Node 14.17, is faster, and
+// removes a dependency instead of pinning one.
+import { randomUUID as uuidv4 } from 'node:crypto';
 import {
   ProcessedChunk,
   ChunkMetadata,
@@ -22,8 +32,10 @@ import * as fs from 'fs'; // Necesario para verificar si existe el archivo .ts o
  */
 export class NestChunker {
   private project: Project;
+  private readonly rootDir: string;
 
-  constructor() {
+  constructor(rootDir: string = process.cwd()) {
+    this.rootDir = path.resolve(rootDir);
     // Initialize ts-morph project.
     // We skip loading the whole tsconfig for speed, processing files individually.
     this.project = new Project({
@@ -101,6 +113,7 @@ export class NestChunker {
    * Stores the whole file as one chunk. Essential for DTOs/Entities context.
    */
   private processAtomicFile(sourceFile: SourceFile): ProcessedChunk[] {
+    const classDeclaration = sourceFile.getClasses()[0];
     return [
       {
         id: uuidv4(),
@@ -110,6 +123,9 @@ export class NestChunker {
           startLine: 1,
           endLine: sourceFile.getEndLineNumber(),
           className: this.getClassName(sourceFile),
+          documentation: classDeclaration === undefined
+            ? undefined
+            : this.documentationOf(classDeclaration),
         },
       },
     ];
@@ -138,6 +154,7 @@ export class NestChunker {
           endLine: cls.getEndLineNumber(),
           className: cls.getName(),
           decorators: cls.getDecorators().map((d) => d.getName()),
+          documentation: this.documentationOf(cls),
         },
       });
 
@@ -155,6 +172,7 @@ export class NestChunker {
             className: cls.getName(),
             methodName: method.getName(),
             decorators: method.getDecorators().map((d) => d.getName()),
+            documentation: this.documentationOf(method),
           },
         });
       }
@@ -178,6 +196,8 @@ export class NestChunker {
       .getDecorators()
       .map((d) => d.getText())
       .join('\n');
+    const documentation = this.documentationOf(cls);
+    if (documentation !== undefined) text = `${documentation}\n${text}`;
     text += `\nexport class ${cls.getName()} {\n`;
 
     // Add properties (e.g., private readonly userService: UserService;)
@@ -204,6 +224,23 @@ export class NestChunker {
   }
 
   /**
+   * Reads the documentation attached to one declaration without guessing from
+   * nearby comments. Keeping it structured lets lexical retrieval weight the
+   * explanation independently from implementation text.
+   *
+   * @param declaration - A class or method declaration from the source AST.
+   * @returns The joined TSDoc blocks, or undefined when none exist.
+   */
+  private documentationOf(declaration: ClassDeclaration | MethodDeclaration): string | undefined {
+    const documentation = declaration
+      .getJsDocs()
+      .map((doc) => doc.getText().trim())
+      .filter((doc) => doc.length > 0)
+      .join('\n');
+    return documentation.length === 0 ? undefined : documentation;
+  }
+
+  /**
    * Extracts static import relationships to build the Dependency Graph.
    * It parses the AST to find all relative imports and resolves them to physical files.
    * * @param sourceFile - The AST SourceFile object from ts-morph.
@@ -219,7 +256,7 @@ export class NestChunker {
 
     // Necesitamos el directorio absoluto para resolver, así que combinamos CWD + sourcePath
     // Nota: Asumimos que sourcePath entra como relativa, ej: 'src/users/users.service.ts'
-    const absoluteSourcePath = path.resolve(process.cwd(), sourcePath);
+    const absoluteSourcePath = path.resolve(this.rootDir, sourcePath);
     const sourceDir = path.dirname(absoluteSourcePath);
 
     for (const imp of imports) {
@@ -235,7 +272,7 @@ export class NestChunker {
           // 4. Normalization: Convert back to relative path for the Database
           // We use split/join to force forward slashes (/) even on Windows for DB consistency.
           const relativeTarget = path
-            .relative(process.cwd(), resolvedPath)
+            .relative(this.rootDir, resolvedPath)
             .split(path.sep)
             .join('/');
 
