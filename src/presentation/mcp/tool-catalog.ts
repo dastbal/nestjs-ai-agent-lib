@@ -59,6 +59,14 @@ export interface PublishedTool {
   readonly invoke: (args: Record<string, unknown>) => Promise<McpToolResult>;
 }
 
+/** Current availability of semantic retrieval without invoking a provider. */
+export interface SemanticSearchReadiness {
+  /** Whether an `ask_codebase` call can retrieve from durable vector coverage. */
+  readonly ready: boolean;
+  /** Operator-facing state that tells a client whether a retry is useful. */
+  readonly message: string;
+}
+
 /**
  * Minimal structural view of a LangChain tool, so this catalog does not depend
  * on the framework's concrete types.
@@ -177,7 +185,10 @@ function publishIntegrityCheck(): PublishedTool {
  * @param decorate - Adds index provenance to a successful answer.
  * @returns The published tool.
  */
-function publishAskCodebase(decorate: (text: string) => string): PublishedTool {
+function publishAskCodebase(
+  decorate: (text: string) => string,
+  readReadiness: () => SemanticSearchReadiness,
+): PublishedTool {
   return {
     name: 'ask_codebase',
     description:
@@ -202,6 +213,14 @@ function publishAskCodebase(decorate: (text: string) => string): PublishedTool {
         return toErrorResult('query is required and must be a non-empty string.');
       }
 
+      const readiness = readReadiness();
+      if (!readiness.ready) {
+        return toErrorResult(
+          `Semantic search is not ready: ${readiness.message}. ` +
+            'Read get_index_status and retry when durable vector coverage is available.',
+        );
+      }
+
       const raw = await runTool(askCodebaseTool, { query, context });
       const mapped = toToolResult(raw);
 
@@ -214,30 +233,42 @@ function publishAskCodebase(decorate: (text: string) => string): PublishedTool {
   };
 }
 
+/** Publishes durable index coverage and live background-index state. */
+function publishIndexStatus(readIndexStatus: () => string): PublishedTool {
+  return {
+    name: 'get_index_status',
+    description:
+      'Reports the current project-index lifecycle and durable vector coverage without calling an ' +
+      'embedding provider. Use it before retrying semantic search while indexing is in progress.',
+    inputSchema: {},
+    invoke: async () => ({ content: [{ type: 'text', text: readIndexStatus() }] }),
+  };
+}
+
 /**
  * Assembles the published catalog.
  *
- * ## Why `ask_codebase` is conditional
+ * ## Why `ask_codebase` stays visible while indexing
  *
- * Three of the four tools are free and need no credentials. `ask_codebase`
- * embeds the query, which under Vertex costs money and requires ADC, and under
- * Ollama requires a running daemon with the model pulled. Advertising it when
- * neither holds would tell a foreign model about a tool that fails on first
- * use — the exact defect ADR-013 recorded, and worse here because the list is
- * fixed at launch and cannot be corrected mid-session.
+ * The catalog is fixed before the MCP handshake. `ask_codebase` therefore
+ * exposes a typed, retryable availability result while its background index is
+ * starting, rather than withholding the capability until a client has already
+ * cached its tool list. It invokes retrieval only after the supplied readiness
+ * boundary confirms durable coverage.
  *
  * @param options - Whether semantic search can answer, and how to stamp it.
  * @returns The tools to publish, in advertisement order.
  */
 export function buildToolCatalog(options: {
-  semanticSearchAvailable: boolean;
+  semanticSearchReadiness: () => SemanticSearchReadiness;
+  readIndexStatus: () => string;
   decorateSemanticAnswer?: (text: string) => string;
 }): PublishedTool[] {
-  const catalog = [publishListAdrs(), publishDependencyGraph(), publishIntegrityCheck()];
-
-  if (options.semanticSearchAvailable) {
-    catalog.unshift(publishAskCodebase(options.decorateSemanticAnswer ?? ((text) => text)));
-  }
-
-  return catalog;
+  return [
+    publishAskCodebase(options.decorateSemanticAnswer ?? ((text) => text), options.semanticSearchReadiness),
+    publishIndexStatus(options.readIndexStatus),
+    publishListAdrs(),
+    publishDependencyGraph(),
+    publishIntegrityCheck(),
+  ];
 }

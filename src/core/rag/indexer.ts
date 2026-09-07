@@ -2,7 +2,7 @@ import { FileRegistry } from '../state/file-registry';
 import { NestChunker } from '../tools/ast/chunker';
 import { AgentDB } from '../state/db';
 import { runtimeRoot } from '../config/runtime-root';
-import { finishTransientLine, writeFragment, writeLine, writeTransientLine } from '../observability/console-sink';
+import { finishTransientLine, writeLine, writeTransientLine } from '../observability/console-sink';
 import { EmbeddingsPort } from './embeddings';
 import { resolveEmbeddings } from './embeddings/embeddings-resolver';
 import { readIndexStamp, writeIndexStamp } from './index-stamp';
@@ -65,16 +65,28 @@ export class IndexerService {
   /** The embedding provider whose `chunk_vectors` rows this run writes. */
   private readonly embeddings: EmbeddingsPort;
 
+  /** Timestamp used only for a stable elapsed-time and ETA progress display. */
+  private indexingStartedAt = 0;
+
+  /** Optional observer used by a host such as MCP to expose live progress. */
+  private readonly progressObserver?: (progress: string) => void;
+
   /**
    * @param embeddings - Embedding port to index with. Defaults to the resolved
    *        provider, so every existing `new IndexerService()` call site keeps
    *        working unchanged.
+   * @param progressObserver - Optional non-persistent progress sink. It never
+   *        changes the durable indexing result.
    */
-  constructor(embeddings: EmbeddingsPort = resolveEmbeddings().port) {
+  constructor(
+    embeddings: EmbeddingsPort = resolveEmbeddings().port,
+    progressObserver?: (progress: string) => void,
+  ) {
     this.registry = new FileRegistry();
     this.chunker = new NestChunker(runtimeRoot());
     this.db = AgentDB.getInstance();
     this.embeddings = embeddings;
+    this.progressObserver = progressObserver;
   }
 
   /**
@@ -93,6 +105,7 @@ export class IndexerService {
 
   /** Performs one shared index run after callers have joined the active promise. */
   private async indexProjectOnce(): Promise<void> {
+    this.indexingStartedAt = Date.now();
     const rootDir = runtimeRoot();
     let discovery;
     try {
@@ -199,8 +212,7 @@ export class IndexerService {
    * a file registry hash claim vectors that were never saved.
    */
   private async indexSingleFile(file: WorkspaceFile, position: number, total: number): Promise<void> {
-    const percentage = Math.floor((position / total) * 100);
-    IndexerService.progress(`${percentage}% | ${position}/${total} | ${compactPath(file.relativePath)} | analyzing`);
+    this.reportProgress(file.relativePath, position, total, 0, 'preparing');
     const content = fs.readFileSync(file.absolutePath, 'utf-8');
     const hash = crypto.createHash('md5').update(content).digest('hex');
     const analysis = this.chunker.analyze(file.relativePath, content, hash);
@@ -240,7 +252,7 @@ export class IndexerService {
       for (const edge of analysis.dependencies) insertEdge.run(edge.sourcePath, edge.targetPath, edge.relation);
     });
     commit();
-    IndexerService.progress(`${percentage}% | ${position}/${total} | ${compactPath(file.relativePath)} | saved ${chunks.length} chunks`);
+    this.reportProgress(file.relativePath, position, total, vectors.length, `saved ${chunks.length} chunks`);
   }
 
   /** Embeds all chunks belonging to one file before that file becomes durable. */
@@ -254,15 +266,27 @@ export class IndexerService {
       let lastError: unknown;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          const label = `${Math.floor((filePosition / fileTotal) * 100)}% | ${filePosition}/${fileTotal} | ${compactPath(filePath)} | batch ${batchNumber}/${batches}`;
-          IndexerService.progress(`${label} | embedding ${batch.length} chunks`);
+          const label = `batch ${batchNumber}/${batches}`;
+          this.reportProgress(filePath, filePosition, fileTotal, vectors.length, `${label} · embedding ${batch.length}`);
           const startedAt = Date.now();
           const result = await this.awaitEmbeddingWithHeartbeat(
             this.embeddings.embedDocuments(batch.map(embeddingInputFor)),
-            label,
+            (elapsed) => this.reportProgress(
+              filePath,
+              filePosition,
+              fileTotal,
+              vectors.length,
+              `${label} · working ${elapsed}`,
+            ),
           );
           vectors.push(...result);
-          IndexerService.progress(`${label} | embedded ${formatElapsed(Date.now() - startedAt)}`);
+          this.reportProgress(
+            filePath,
+            filePosition,
+            fileTotal,
+            vectors.length,
+            `${label} · embedded in ${formatElapsed(Date.now() - startedAt)}`,
+          );
           lastError = undefined;
           break;
         } catch (error: unknown) {
@@ -277,10 +301,13 @@ export class IndexerService {
   }
 
   /** Emits a visible heartbeat while an embedding request is pending. */
-  private async awaitEmbeddingWithHeartbeat<T>(request: Promise<T>, label: string): Promise<T> {
+  private async awaitEmbeddingWithHeartbeat<T>(
+    request: Promise<T>,
+    reportHeartbeat: (elapsed: string) => void,
+  ): Promise<T> {
     const startedAt = Date.now();
     const heartbeat = setInterval(() => {
-      IndexerService.progress(`${label} | working ${formatElapsed(Date.now() - startedAt)}`);
+      reportHeartbeat(formatElapsed(Date.now() - startedAt));
     }, 15_000);
     heartbeat.unref();
     try {
@@ -288,6 +315,28 @@ export class IndexerService {
     } finally {
       clearInterval(heartbeat);
     }
+  }
+
+  /** Renders one width-stable interactive line for the file currently being indexed. */
+  private reportProgress(
+    filePath: string,
+    position: number,
+    total: number,
+    vectors: number,
+    state: string,
+  ): void {
+    const elapsed = Math.max(0, Date.now() - this.indexingStartedAt);
+    const remaining = position >= total || position === 0
+      ? 0
+      : Math.round((elapsed / position) * (total - position));
+    const percentage = Math.floor((position / total) * 100).toString().padStart(3);
+    const fileCounter = `${position}/${total}`.padStart(7);
+    const vectorCounter = `${vectors} vec`.padStart(7);
+    const progress =
+      `${percentage}% | ${fileCounter} | ${compactPath(filePath, 22).padEnd(22)} | ` +
+        `${vectorCounter} | ${formatElapsed(elapsed).padStart(5)} | ETA ${formatElapsed(remaining).padStart(5)} | ${state}`;
+    this.progressObserver?.(progress);
+    IndexerService.progress(progress);
   }
 
   // ==========================================
@@ -406,7 +455,7 @@ export class IndexerService {
         );
         insertMany(batch, vectors);
         embedded += batch.length;
-        writeFragment('.');
+        IndexerService.progress(`backfill | ${embedded}/${pending.length} vectors | ${identity.provider}/${identity.model}`);
       } catch (err: unknown) {
         // Counted, not printed per batch: a misconfiguration fails identically
         // every time, and one summary is more useful than N stack traces. Same
@@ -558,7 +607,6 @@ export class IndexerService {
           // corrupts the JSON-RPC stream before the handshake completes.
           // ADR-024's evidence did not catch this, because its grep looked
           // for `console.log` only.
-          writeFragment('.'); // Visual feedback
           success = true;
           
           // Delay between batches to prevent triggering limits on large projects
@@ -649,6 +697,8 @@ function formatElapsed(milliseconds: number): string {
 }
 
 /** Keeps a transient line readable when a repository uses very deep paths. */
-function compactPath(filePath: string): string {
-  return filePath.length <= 34 ? filePath : `…${filePath.slice(-33)}`;
+function compactPath(filePath: string, maximumLength = 34): string {
+  return filePath.length <= maximumLength
+    ? filePath
+    : `…${filePath.slice(-(maximumLength - 1))}`;
 }

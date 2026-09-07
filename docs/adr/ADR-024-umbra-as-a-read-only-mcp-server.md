@@ -796,3 +796,44 @@ activation step, not an install hook and not a write initiated by an MCP tool.
   opened.
 - `src/core/config/workspace-scaffold.ts` — `ensureAgentStateIgnored` reused
   as the preservation boundary.
+
+---
+
+### 12 — 2026-09-06 · The MCP handshake precedes provider work
+
+The MCP catalog is fixed and connected before Umbra probes an embedding
+provider or begins indexing. A slow Ollama model can therefore never consume a
+client's startup window. The five published tools are stable: `ask_codebase`,
+`get_index_status`, `list_adrs`, `query_dependency_graph`, and
+`run_integrity_check`.
+
+`ask_codebase` remains visible while indexing, but it will not query a partial
+or absent vector store. Until the SQLite coverage check is healthy, it returns a
+structured, retryable tool error that directs the caller to `get_index_status`.
+That status and `umbra://index-status` share one renderer: they report the live
+process lifecycle plus the durable stamp and SQLite coverage without calling a
+provider.
+
+Indexing output is diagnostic-only on stderr. An interactive CLI repaints one
+fixed-width, colour-coded row containing percent, file counter, truncated path,
+vector counter, elapsed time, ETA, and current batch. Errors and milestones
+finish that transient row and remain as permanent lines. Redirected output
+receives complete lines, preserving stdout exclusively for JSON-RPC.
+
+### Verification evidence
+
+- `tool-catalog.spec.ts`, `resource-catalog.spec.ts`, and
+  `sdk-server.spec.ts` — 12 tests passed, covering the stable catalog, the
+  retryable indexing result, and the live index-status resource.
+- `node node_modules/typescript/bin/tsc --noEmit --pretty false` — passed.
+- `git diff --check` — passed.
+
+### Related files added by this amendment
+
+- `src/presentation/mcp/start-mcp-server.ts` — connects before background
+  probe/index work and owns the lifecycle truth.
+- `src/presentation/mcp/tool-catalog.ts` — stable status tool and readiness
+  gate around semantic retrieval.
+- `src/presentation/mcp/resource-catalog.ts` — reads live lifecycle status.
+- `src/core/rag/indexer.ts` — compact progress observer and repaint format.
+- `src/core/observability/console-sink.ts` — fixed-width terminal rendering.

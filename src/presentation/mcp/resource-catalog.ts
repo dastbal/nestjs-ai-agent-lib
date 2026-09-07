@@ -46,9 +46,14 @@ export interface PublishedResource {
  * Assembles the resource catalog for a pinned repository root.
  *
  * @param rootDir - The repository this server serves.
+ * @param readLiveIndexStatus - Optional process-local lifecycle status. Durable
+ * coverage is still read from SQLite by the supplied status renderer.
  * @returns The resources to publish.
  */
-export function buildResourceCatalog(rootDir: string): PublishedResource[] {
+export function buildResourceCatalog(
+  rootDir: string,
+  readLiveIndexStatus?: () => string,
+): PublishedResource[] {
   return [
     {
       descriptor: {
@@ -77,7 +82,7 @@ export function buildResourceCatalog(rootDir: string): PublishedResource[] {
       read: () => ({
         uri: INDEX_STATUS_URI,
         mimeType: 'text/plain',
-        text: describeIndexStatus(rootDir),
+        text: readLiveIndexStatus?.() ?? describeIndexStatus(rootDir),
       }),
     },
   ];
