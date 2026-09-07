@@ -761,3 +761,38 @@ install hook or consumer configuration write was introduced.
 >    estimate.
 > 3. **`ask_human` as MCP elicitation** — constraint 2's stated future bridge,
 >    and the prerequisite for anything that writes. Unchanged and unstarted.
+
+---
+
+### 11 — 2026-09-06 · Automatic activation has a stricter project boundary
+
+`resolveMcpProjectRoot` now accepts only durable project declarations:
+`package.json`, `tsconfig.json`, `pnpm-workspace.yaml`, `umbra.json`, or a Git
+directory/worktree marker. A bare `src` directory is not a project declaration
+and is no longer sufficient. The exact home directory and the system temporary
+directory are refused even if a marker happens to exist there.
+
+After this validation, `activateMcpProjectRoot` first ensures the consumer's
+`.gitignore` covers `.umbra/`; only then does it create the root-owned state
+directory. If that ignore guarantee cannot be established, MCP startup fails
+without creating a new unignored workspace. This is an explicit automatic
+activation step, not an install hook and not a write initiated by an MCP tool.
+
+### Verification evidence
+
+- `project-root.spec.ts` and `agent-state-ignore.spec.ts` — 20 tests passed,
+  including a `src`-only directory, Git worktree marker, blocked launch root,
+  first activation, and idempotent activation.
+- `mcp-config.spec.ts` and `sdk-server.spec.ts` — 16 regression tests passed.
+- `node node_modules/typescript/bin/tsc --noEmit --pretty false` — passed.
+
+### Related files added by this amendment
+
+- `src/presentation/mcp/project-root.ts` — `resolveMcpProjectRoot` and
+  `activateMcpProjectRoot`.
+- `src/presentation/mcp/project-root.spec.ts` — launch-boundary and activation
+  regressions.
+- `src/presentation/mcp/start-mcp-server.ts` — activation before MCP state is
+  opened.
+- `src/core/config/workspace-scaffold.ts` — `ensureAgentStateIgnored` reused
+  as the preservation boundary.

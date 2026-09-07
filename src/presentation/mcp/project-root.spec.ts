@@ -2,7 +2,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { resolveMcpProjectRoot } from './project-root';
+import {
+  activateMcpProjectRoot,
+  resolveMcpProjectRoot,
+} from './project-root';
 
 describe('resolveMcpProjectRoot', () => {
   let projectRoot: string;
@@ -41,5 +44,38 @@ describe('resolveMcpProjectRoot', () => {
   it('refuses an ambiguous working directory before creating a workspace there', () => {
     expect(() => resolveMcpProjectRoot({}, nonProjectRoot))
       .toThrow(/working directory is not a project/);
+  });
+
+  it('refuses a directory whose only marker is src', () => {
+    fs.mkdirSync(path.join(nonProjectRoot, 'src'));
+
+    expect(() => resolveMcpProjectRoot({}, nonProjectRoot))
+      .toThrow(/working directory is not a project/);
+  });
+
+  it('accepts a Git worktree marker stored as a file', () => {
+    fs.rmSync(path.join(projectRoot, 'package.json'));
+    fs.writeFileSync(path.join(projectRoot, '.git'), 'gitdir: ../.git/worktrees/fixture\n', 'utf8');
+
+    expect(resolveMcpProjectRoot({}, projectRoot)).toEqual({
+      rootDir: fs.realpathSync(projectRoot),
+      source: 'working-directory',
+    });
+  });
+
+  it('refuses an explicitly blocked launch directory even when it has project markers', () => {
+    expect(() => resolveMcpProjectRoot({}, projectRoot, { blockedRoots: [projectRoot] }))
+      .toThrow(/unsafe launch directory/);
+  });
+
+  it('creates one workspace and adds the Umbra ignore rule only after root validation', () => {
+    const root = resolveMcpProjectRoot({}, projectRoot);
+    const activation = activateMcpProjectRoot(root);
+
+    expect(fs.existsSync(path.join(projectRoot, '.umbra'))).toBe(true);
+    expect(fs.readFileSync(path.join(projectRoot, '.gitignore'), 'utf8')).toContain('.umbra/');
+    expect(activation.addedIgnoreRules).toContain('.umbra/');
+
+    expect(activateMcpProjectRoot(root).addedIgnoreRules).toEqual([]);
   });
 });

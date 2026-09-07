@@ -302,6 +302,16 @@ transaction after embeddings succeed. A failed file retains its previous hash
 or no registry row, so discovery retries it rather than reporting a complete
 index with no vectors. `umbra doctor --index` inspects these tables read-only.
 
+## Amendment — 2026-09-06 · Activation creates state only in a declared root
+
+Global MCP activation now requires the serving root to be declared by a
+manifest, TypeScript configuration, Umbra configuration, or Git metadata; a
+directory named `src` does not qualify. Once accepted, it owns the single
+`.umbra/` workspace described by this record and its `.gitignore` protection is
+established before the directory is created. Discovery rules for source roots
+are unchanged: a declared monorepo still contributes many source projects to
+that one root-owned workspace.
+
 ## Related files
 
 - `src/core/config/workspace-discovery.ts` — proposed `WorkspaceDiscoveryService`.

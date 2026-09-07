@@ -11,6 +11,7 @@ import { withProvenance } from './dto-mapper';
 import { buildPromptCatalog } from './prompt-catalog';
 import { buildResourceCatalog } from './resource-catalog';
 import { buildToolCatalog } from './tool-catalog';
+import { activateMcpProjectRoot } from './project-root';
 import { loadMcpSdk } from './sdk-loader';
 import { buildSdkServer } from './sdk-server';
 
@@ -76,7 +77,11 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<vo
   // 3. The root is fixed here and nowhere else.
   pinRuntimeRoot(options.root);
   const rootDir = runtimeRoot();
+  const activation = activateMcpProjectRoot({ rootDir, source: 'working-directory' });
   report(`umbra mcp — serving ${rootDir}`);
+  if (activation.addedIgnoreRules.length > 0) {
+    report(`added local-state ignore rules: ${activation.addedIgnoreRules.join(', ')}`);
+  }
 
   // 4. Can semantic search actually answer?
   //
