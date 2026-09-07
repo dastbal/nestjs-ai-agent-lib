@@ -594,11 +594,21 @@ program
       if (options.root === undefined && options.autoRoot !== true) {
         throw new Error('Choose a root: --root <path>, or --auto-root for a globally configured client.');
       }
-      const root = options.autoRoot === true
-        ? resolveMcpProjectRoot().rootDir
-        : options.root as string;
+      let root = options.root;
+      let awaitMcpRoot = false;
+      if (options.autoRoot === true) {
+        try {
+          // Codex launches in the active project directory in the verified
+          // path. A client that does not will still complete its handshake and
+          // may supply exactly one MCP root after initialization.
+          root = resolveMcpProjectRoot().rootDir;
+        } catch {
+          awaitMcpRoot = true;
+        }
+      }
       await startMcpServer({
         root,
+        awaitMcpRoot,
         version: readPackageVersion(),
         embeddings: options.embeddings,
         // commander maps `--no-index` to `index: false`.

@@ -47,6 +47,12 @@ export interface McpSdk {
  * type-checks without coupling application types to SDK internals.
  */
 export interface McpServerLike {
+  /** Underlying protocol server methods needed only for optional client roots. */
+  readonly server: {
+    oninitialized?: () => void;
+    listRoots(): Promise<{ roots: readonly { uri: string; name?: string }[] }>;
+  };
+
   registerTool(
     name: string,
     config: {

@@ -10,14 +10,26 @@ import { readIndexStamp } from '../../core/rag/index-stamp';
 import { IndexerService } from '../../core/rag/indexer';
 import { withProvenance } from './dto-mapper';
 import { buildPromptCatalog } from './prompt-catalog';
-import { activateMcpProjectRoot } from './project-root';
+import {
+  activateMcpProjectRoot,
+  McpProjectRoot,
+  resolveMcpProjectRootFromUris,
+} from './project-root';
 import { buildResourceCatalog } from './resource-catalog';
-import { loadMcpSdk } from './sdk-loader';
+import { loadMcpSdk, McpServerLike } from './sdk-loader';
 import { buildSdkServer } from './sdk-server';
 import { buildToolCatalog, SemanticSearchReadiness } from './tool-catalog';
 
-/** Lifecycle stages visible while an MCP project index is warming. */
-type McpIndexPhase = 'starting' | 'probing' | 'indexing' | 'ready' | 'unavailable' | 'failed' | 'skipped';
+/** Lifecycle stages visible while an MCP project root and index are warming. */
+type McpIndexPhase =
+  | 'awaiting-root'
+  | 'starting'
+  | 'probing'
+  | 'indexing'
+  | 'ready'
+  | 'unavailable'
+  | 'failed'
+  | 'skipped';
 
 /** In-memory truth about the current process; durable coverage still lives in SQLite. */
 interface McpIndexLifecycle {
@@ -28,8 +40,10 @@ interface McpIndexLifecycle {
 
 /** Options for {@link startMcpServer}. */
 export interface StartMcpServerOptions {
-  /** Repository to serve. Pinned; never read from a tool argument. */
-  root: string;
+  /** Repository to serve when the launcher already has a trusted project context. */
+  root?: string;
+  /** When true and `root` is absent, request exactly one MCP client root after handshake. */
+  awaitMcpRoot?: boolean;
   /** Package version, reported in `serverInfo`. */
   version: string;
   /** Embedding provider override, e.g. from `--embeddings`. */
@@ -43,8 +57,9 @@ export interface StartMcpServerOptions {
  *
  * The protocol connection is established before provider probing or indexing.
  * A slow local model can therefore never consume the client's MCP startup
- * window; `get_index_status` and `umbra://index-status` report honest progress
- * until semantic retrieval has durable vector coverage.
+ * window. When a globally configured client cannot give Umbra a trustworthy
+ * working directory, the transport still connects and Umbra asks it for one
+ * unambiguous MCP `file:` root before creating `.umbra` or touching SQLite.
  */
 export async function startMcpServer(options: StartMcpServerOptions): Promise<void> {
   // stdout belongs to JSON-RPC from this line onward.
@@ -57,20 +72,26 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<vo
     throw new Error('The MCP server requires @modelcontextprotocol/sdk.');
   }
 
-  // Root-bound state is still pinned before any database, provider, or tool can
-  // touch it. The connection itself is root-neutral protocol plumbing.
-  pinRuntimeRoot(options.root);
-  const rootDir = runtimeRoot();
-  const activation = activateMcpProjectRoot({ rootDir, source: 'working-directory' });
-  const lifecycle: McpIndexLifecycle = {
-    phase: 'starting',
-    message: 'MCP connected; preparing the semantic index.',
-  };
+  let rootDir: string | undefined;
+  const lifecycle: McpIndexLifecycle = options.root === undefined
+    ? {
+      phase: 'awaiting-root',
+      message: options.awaitMcpRoot === true
+        ? 'Waiting for one validated MCP project root.'
+        : 'No validated project root was supplied.',
+    }
+    : { phase: 'starting', message: 'MCP connected; preparing the semantic index.' };
+
+  if (options.root !== undefined) {
+    rootDir = activatePinnedRoot({ rootDir: options.root, source: 'working-directory' });
+  }
 
   const tools = buildToolCatalog({
     semanticSearchReadiness: () => semanticSearchReadiness(rootDir, lifecycle),
     readIndexStatus: () => describeIndexStatus(rootDir, lifecycle),
     decorateSemanticAnswer: (text) => decorateSemanticAnswer(rootDir, text),
+    projectRootReady: () => rootDir !== undefined,
+    projectRootMessage: () => lifecycle.message,
   });
   const server = buildSdkServer(load.sdk, {
     version: options.version,
@@ -79,13 +100,17 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<vo
       'background; call get_index_status before retrying ask_codebase. The repository is fixed for ' +
       'this session and cannot be changed by a tool argument.',
     tools,
-    resources: buildResourceCatalog(rootDir, () => describeIndexStatus(rootDir, lifecycle)),
+    resources: buildResourceCatalog(() => rootDir, () => describeIndexStatus(rootDir, lifecycle)),
     prompts: buildPromptCatalog(),
   });
 
-  report(`umbra mcp — serving ${rootDir}`);
-  if (activation.addedIgnoreRules.length > 0) {
-    report(`added local-state ignore rules: ${activation.addedIgnoreRules.join(', ')}`);
+  if (rootDir === undefined) {
+    wireClientRootResolution(server, options, lifecycle, (resolved) => {
+      rootDir = resolved;
+    });
+    report('umbra mcp — connected without a project root; waiting for client roots.');
+  } else {
+    report(`umbra mcp — serving ${rootDir}`);
   }
   report(`publishing ${tools.length} tools: ${tools.map((tool) => tool.name).join(', ')}`);
 
@@ -93,7 +118,9 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<vo
   await server.connect(new load.sdk.StdioServerTransport());
   report('MCP transport connected; index warm-up continues in the background.');
 
-  void warmIndexInBackground(rootDir, options, lifecycle);
+  if (rootDir !== undefined) {
+    void warmIndexInBackground(rootDir, options, lifecycle);
+  }
 
   await new Promise<void>((resolve) => {
     process.stdin.once('end', () => resolve());
@@ -103,6 +130,63 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<vo
 
   await server.close();
   report('client disconnected');
+}
+
+/** Pins one accepted root, protects it with gitignore, and reports activation. */
+function activatePinnedRoot(root: McpProjectRoot): string {
+  pinRuntimeRoot(root.rootDir);
+  const rootDir = runtimeRoot();
+  const activation = activateMcpProjectRoot({ ...root, rootDir });
+  if (activation.addedIgnoreRules.length > 0) {
+    report(`added local-state ignore rules: ${activation.addedIgnoreRules.join(', ')}`);
+  }
+  return rootDir;
+}
+
+/** Requests an MCP root only after the client has completed its initialization handshake. */
+function wireClientRootResolution(
+  server: McpServerLike,
+  options: StartMcpServerOptions,
+  lifecycle: McpIndexLifecycle,
+  setRoot: (rootDir: string) => void,
+): void {
+  let requested = false;
+  server.server.oninitialized = () => {
+    if (requested) return;
+    requested = true;
+    void resolveClientRoot(server, options, lifecycle, setRoot);
+  };
+}
+
+/** Validates one client root before any state or provider activity begins. */
+async function resolveClientRoot(
+  server: McpServerLike,
+  options: StartMcpServerOptions,
+  lifecycle: McpIndexLifecycle,
+  setRoot: (rootDir: string) => void,
+): Promise<void> {
+  if (options.awaitMcpRoot !== true) {
+    lifecycle.phase = 'failed';
+    lifecycle.message = 'No validated project root was supplied. Open one project and reconnect.';
+    report(lifecycle.message);
+    return;
+  }
+
+  try {
+    const response = await server.server.listRoots();
+    const root = resolveMcpProjectRootFromUris(response.roots.map((candidate) => candidate.uri));
+    const rootDir = activatePinnedRoot(root);
+    setRoot(rootDir);
+    lifecycle.phase = 'starting';
+    lifecycle.message = 'Validated MCP project root; preparing the semantic index.';
+    report(`validated MCP root — serving ${rootDir}`);
+    void warmIndexInBackground(rootDir, options, lifecycle);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    lifecycle.phase = 'failed';
+    lifecycle.message = `Could not validate an MCP project root: ${message}`;
+    report(lifecycle.message);
+  }
 }
 
 /** Starts provider probing and indexing without delaying the MCP handshake. */
@@ -180,7 +264,11 @@ async function warmIndexInBackground(
 }
 
 /** Builds the availability response used by the stable semantic-search tool. */
-function semanticSearchReadiness(rootDir: string, lifecycle: McpIndexLifecycle): SemanticSearchReadiness {
+function semanticSearchReadiness(
+  rootDir: string | undefined,
+  lifecycle: McpIndexLifecycle,
+): SemanticSearchReadiness {
+  if (rootDir === undefined) return { ready: false, message: lifecycle.message };
   if (lifecycle.phase !== 'ready') return { ready: false, message: lifecycle.message };
 
   const stamp = readIndexStamp(rootDir);
@@ -197,15 +285,16 @@ function hasDurableCoverage(rootDir: string, provider: 'vertex' | 'ollama', mode
 }
 
 /** Renders the shared MCP resource/tool view of live and durable index state. */
-function describeIndexStatus(rootDir: string, lifecycle: McpIndexLifecycle): string {
+function describeIndexStatus(rootDir: string | undefined, lifecycle: McpIndexLifecycle): string {
   const lines = [
     `state:         ${lifecycle.phase}`,
     `message:       ${lifecycle.message}`,
-    `root:          ${rootDir}`,
+    `root:          ${rootDir ?? 'not yet validated'}`,
   ];
   if (lifecycle.startedAt !== undefined) {
     lines.push(`started at:    ${new Date(lifecycle.startedAt).toISOString()}`);
   }
+  if (rootDir === undefined) return lines.join('\n');
 
   const stamp = readIndexStamp(rootDir);
   if (stamp !== undefined) {
@@ -227,7 +316,8 @@ function describeIndexStatus(rootDir: string, lifecycle: McpIndexLifecycle): str
 }
 
 /** Adds provenance only after the readiness boundary has allowed a real search. */
-function decorateSemanticAnswer(rootDir: string, text: string): string {
+function decorateSemanticAnswer(rootDir: string | undefined, text: string): string {
+  if (rootDir === undefined) return text;
   const current = readIndexStamp(rootDir);
   const active = resolveEmbeddings().port.identity;
   return withProvenance(text, {

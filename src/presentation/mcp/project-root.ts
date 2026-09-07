@@ -1,11 +1,12 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { AGENT_DIR_NAME, agentPath } from '../../core/config/agent-directory';
 import { ensureAgentStateIgnored } from '../../core/config/workspace-scaffold';
 
 /** Identifies the trusted launch context from which an MCP root was resolved. */
-export type McpProjectRootSource = 'claude-project-dir' | 'working-directory';
+export type McpProjectRootSource = 'claude-project-dir' | 'mcp-roots' | 'working-directory';
 
 /** A root accepted for one MCP server process. */
 export interface McpProjectRoot {
@@ -19,6 +20,28 @@ export interface McpProjectRoot {
 export interface McpProjectRootResolutionOptions {
   /** Exact canonical roots that are never safe to activate. */
   readonly blockedRoots?: readonly string[];
+}
+
+/** Resolves exactly one trusted file-system root supplied by an MCP client. */
+export function resolveMcpProjectRootFromUris(
+  rootUris: readonly string[],
+  options: McpProjectRootResolutionOptions = {},
+): McpProjectRoot {
+  if (rootUris.length === 0) {
+    throw new Error('Cannot start global MCP: the client did not provide a project root.');
+  }
+  const blockedRoots = canonicalBlockedRoots(options.blockedRoots);
+  const candidates = rootUris.map((uri) => filePathFromMcpUri(uri));
+  const roots = [...new Set(
+    candidates.map((candidate) => validateProjectRoot(candidate, 'an MCP root', blockedRoots)),
+  )];
+  if (roots.length !== 1) {
+    throw new Error(
+      `Cannot start global MCP: the client supplied ${roots.length} distinct project roots. ` +
+        'Open one project or configure a single workspace root before reconnecting.',
+    );
+  }
+  return { rootDir: roots[0]!, source: 'mcp-roots' };
 }
 
 /** Outcome of creating the durable local state for a validated MCP root. */
@@ -98,6 +121,19 @@ function validateProjectRoot(candidate: string, source: string, blockedRoots: Re
   }
 
   return realRoot;
+}
+
+/** Converts only local `file:` MCP roots into a path Umbra may validate. */
+function filePathFromMcpUri(uri: string): string {
+  try {
+    const parsed = new URL(uri);
+    if (parsed.protocol !== 'file:') {
+      throw new Error('not a file URI');
+    }
+    return fileURLToPath(parsed);
+  } catch {
+    throw new Error(`Cannot start global MCP: unsupported MCP root URI (${uri}).`);
+  }
 }
 
 /** Avoids creating `.umbra` in a home directory or another ambiguous launcher directory. */

@@ -837,3 +837,39 @@ receives complete lines, preserving stdout exclusively for JSON-RPC.
 - `src/presentation/mcp/resource-catalog.ts` — reads live lifecycle status.
 - `src/core/rag/indexer.ts` — compact progress observer and repaint format.
 - `src/core/observability/console-sink.ts` — fixed-width terminal rendering.
+
+---
+
+### 13 — 2026-09-06 · A global client may declare, but never guess, its root
+
+Global configuration has three trusted root paths. Claude's explicit
+`CLAUDE_PROJECT_DIR` remains first. Codex's verified active project working
+directory remains the normal path. If an auto-root client has no valid working
+directory, Umbra completes the MCP handshake without opening a database and
+requests the client's Roots capability.
+
+Only one local `file:` root that independently passes the project and unsafe
+directory checks is accepted. Multiple roots, non-file URIs, missing roots, and
+unrecognised project declarations leave the server connected but root-gated:
+`get_index_status` explains the recovery, while every root-bound tool returns a
+retryable error. No `.umbra/`, `.gitignore`, SQLite database, provider probe, or
+index run occurs in that state. Once one root is accepted, the existing
+activation and background-index path applies unchanged.
+
+### Verification evidence
+
+- `project-root.spec.ts` covers one MCP `file:` root, multiple valid roots,
+  and a non-file URI.
+- `tool-catalog.spec.ts` and `resource-catalog.spec.ts` cover the root-gated
+  stable catalog and the safe pre-root resource response.
+- Focused MCP/RAG suites: 34 tests passed. `tsc --noEmit` and
+  `git diff --check` passed.
+
+### Related files added by this amendment
+
+- `src/presentation/mcp/project-root.ts` — URI-to-root validation.
+- `src/presentation/mcp/start-mcp-server.ts` — post-handshake Roots request.
+- `src/presentation/mcp/tool-catalog.ts` and `resource-catalog.ts` — safe
+  pre-root status and tool gates.
+- `src/presentation/mcp/sdk-loader.ts` — minimal typed Roots capability.
+- `src/bin/cli.ts` — CWD-first auto-root with Roots fallback.

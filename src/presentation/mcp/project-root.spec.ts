@@ -5,6 +5,7 @@ import * as path from 'path';
 import {
   activateMcpProjectRoot,
   resolveMcpProjectRoot,
+  resolveMcpProjectRootFromUris,
 } from './project-root';
 
 describe('resolveMcpProjectRoot', () => {
@@ -34,6 +35,30 @@ describe('resolveMcpProjectRoot', () => {
       rootDir: fs.realpathSync(projectRoot),
       source: 'working-directory',
     });
+  });
+
+  it('accepts one declared MCP file root when no client working directory is trustworthy', () => {
+    const root = fs.realpathSync(projectRoot).replace(/\\/g, '/');
+
+    expect(resolveMcpProjectRootFromUris([`file:///${root.replace(/^\//, '')}`])).toEqual({
+      rootDir: fs.realpathSync(projectRoot),
+      source: 'mcp-roots',
+    });
+  });
+
+  it('refuses ambiguous or non-file MCP roots before activation', () => {
+    const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'umbra-mcp-second-'));
+    fs.writeFileSync(path.join(secondRoot, 'package.json'), '{"name":"second"}', 'utf8');
+    const toUri = (directory: string): string => `file:///${fs.realpathSync(directory).replace(/\\/g, '/').replace(/^\//, '')}`;
+
+    try {
+      expect(() => resolveMcpProjectRootFromUris([toUri(projectRoot), toUri(secondRoot)]))
+        .toThrow(/distinct project roots/);
+      expect(() => resolveMcpProjectRootFromUris(['https://example.test/project']))
+        .toThrow(/unsupported MCP root URI/);
+    } finally {
+      fs.rmSync(secondRoot, { recursive: true, force: true });
+    }
   });
 
   it('refuses an invalid Claude project directory instead of falling back to another directory', () => {

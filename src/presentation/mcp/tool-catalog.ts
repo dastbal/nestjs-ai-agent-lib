@@ -263,12 +263,33 @@ export function buildToolCatalog(options: {
   semanticSearchReadiness: () => SemanticSearchReadiness;
   readIndexStatus: () => string;
   decorateSemanticAnswer?: (text: string) => string;
+  /** Whether a validated repository root is available for root-bound tools. */
+  projectRootReady?: () => boolean;
+  /** Recovery hint when the client has not supplied a valid root yet. */
+  projectRootMessage?: () => string;
 }): PublishedTool[] {
-  return [
+  const catalog = [
     publishAskCodebase(options.decorateSemanticAnswer ?? ((text) => text), options.semanticSearchReadiness),
     publishIndexStatus(options.readIndexStatus),
     publishListAdrs(),
     publishDependencyGraph(),
     publishIntegrityCheck(),
   ];
+  if (options.projectRootReady === undefined) return catalog;
+
+  return catalog.map((tool) => {
+    if (tool.name === 'get_index_status') return tool;
+    return {
+      ...tool,
+      invoke: async (args) => {
+        if (!options.projectRootReady?.()) {
+          return toErrorResult(
+            options.projectRootMessage?.() ??
+              'Umbra has not received one validated project root. Open one project and reconnect.',
+          );
+        }
+        return tool.invoke(args);
+      },
+    };
+  });
 }

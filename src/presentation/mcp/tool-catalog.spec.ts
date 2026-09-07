@@ -39,4 +39,23 @@ describe('MCP ask_codebase catalog', () => {
       content: [{ type: 'text', text: 'state: unavailable\nreason: provider unavailable' }],
     });
   });
+
+  it('keeps the catalog visible but gates root-bound tools until the client supplies a root', async () => {
+    const tools = buildToolCatalog({
+      semanticSearchReadiness: () => ({ ready: false, message: 'waiting for root' }),
+      readIndexStatus: () => 'state: awaiting-root',
+      projectRootReady: () => false,
+      projectRootMessage: () => 'Open exactly one project and reconnect.',
+    });
+    const adrs = tools.find((candidate) => candidate.name === 'list_adrs');
+    const status = tools.find((candidate) => candidate.name === 'get_index_status');
+
+    await expect(adrs?.invoke({})).resolves.toEqual({
+      content: [{ type: 'text', text: expect.stringContaining('Open exactly one project') }],
+      isError: true,
+    });
+    await expect(status?.invoke({})).resolves.toEqual({
+      content: [{ type: 'text', text: 'state: awaiting-root' }],
+    });
+  });
 });
