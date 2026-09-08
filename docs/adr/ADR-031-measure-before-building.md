@@ -5,7 +5,7 @@
 | **Category** | Quality · Evaluation · Roadmap · Cost |
 | **Author** | David Balladares (decision) · Claude (record) |
 | **Date** | 2026-09-08 |
-| **Status** | ✅ **Accepted** — phase 1 implemented; phases 2 and 3 ordered, not built |
+| **Status** | ✅ **Accepted** — phase 1 implemented and measured; phase 2 partially implemented; phase 3 ordered, not built |
 | **Refines** | ADR-019, ADR-024, ADR-028 |
 
 ---
@@ -286,3 +286,74 @@ default base URL is a separate matter and is **not** done here.
 - `src/core/rag/math.ts` — `cosineSimilarity`, the dimension guard the review misread
 - `docs/adr/ADR-028-hybrid-retrieval-requires-evidence.md` — the unmeasured trade-off
 - `.agents/skills/umbra-embedding-retrieval-audit/scripts/run-benchmark.mjs` — the superseded runner, kept for its preflight
+
+---
+
+## Amendment — 2026-09-08 · Phase 1 produced its first number, and it changed two beliefs
+
+The measurement this record was written to make possible has been taken. It
+required repairing the index first, which is itself part of the finding.
+
+**Two index defects had to be fixed before any number meant anything.**
+
+`IGNORED_DIRECTORIES` in `WorkspaceDiscoveryService` did not list `.claude`,
+and `.claude/worktrees/<name>/` is a complete second checkout of this
+repository — 241 TypeScript files. Discovery walked it, so the index held the
+repository twice: `file_registry` carried 309 rows for 157 files, and
+`code_chunks` held 1,005 rows of which 439 were the duplicate set. The same
+hole existed in `jest.config.ts`, where the suite was silently running twice —
+183 suites and 1,633 tests instead of 97 and 818.
+
+Separately, 206 registry rows claimed `index_state = 'indexed'` with **zero
+chunks**: files the chunker skipped before `fix(rag): index classless source
+modules`, which `FileRegistry#isFileChanged` can never revisit because it
+compares only the stored hash. The current chunker was verified correct by
+calling `NestChunker#analyze` directly — one `file` chunk each for `math.ts`,
+`hybrid-ranking.ts`, `embeddings-resolver.ts`, `vector-codec.ts` and
+`turn-governor.ts`. The defect is the missing repair path, not the chunker, and
+it is not fixed here.
+
+The consequence for the historical number: **24 of the 43 distinct expected
+paths in the corpus had no chunk at all.** The reachable hit ceiling was ~44%,
+so the 30% Hit@4 recorded in ADR-027 and ADR-028 was never a measurement of
+retrieval quality. It measured index coverage.
+
+**The number, on a clean index.** 55 calibration cases, Ollama
+`nomic-embed-text`, through the compiled MCP binary, coverage 43/43 so the
+ceiling is 100%:
+
+| | |
+|---|---|
+| Hit@4 (45 positives) | **88.9%** |
+| MRR | 0.706 |
+| False abstention | **0%** |
+| Correct abstention (10 negatives) | **0%** |
+| p95 latency | 827 ms |
+
+Ranking is strong. The abstention policy is broken in the direction nobody
+was watching — see the 2026-09-08 amendment to
+[ADR-028](./ADR-028-hybrid-retrieval-requires-evidence.md). Both facts were
+invisible until the split-aware, coverage-checked harness existed, and the
+second one was structurally unmeasurable while every negative case lived in the
+holdout.
+
+This is the argument of this record, demonstrated on the day it was written: the
+belief that was defended in prose (abstention is too strict) was false, and the
+defect nobody suspected (abstention never fires) was sitting in production.
+
+### Phase 2, first slice — implemented
+
+`TokenCounterPort` with `LocalTokenCounter`, `requestTextOf`, and a ceiling on
+`safe_read_file`. `ContextCompressor.estimateTokens` now counts the whole
+request rather than `msg.content`: tool-call arguments, per-message framing,
+and — when a caller supplies them — the system prompt and tool schemas.
+
+Not yet done in phase 2: no call site passes `overhead` yet, so the compressor
+still under-counts by the fixed cost of the tool catalog; and routing by size
+and early rejection are not implemented.
+
+### Still not verified
+
+- No Vertex run. No paired comparison.
+- The holdout has not been read.
+- The abstention correction is described, not built.

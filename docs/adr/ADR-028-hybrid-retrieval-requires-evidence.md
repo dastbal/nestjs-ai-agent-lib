@@ -98,3 +98,71 @@ or direct lexical evidence, the existing abstention contract applies unchanged.
 
 See ADR-029 for the separate, operator-approved local vocabulary that can help
 later queries without becoming code evidence.
+
+---
+
+## Amendment — 2026-09-08 · The abstention policy was measured, and it fails in the opposite direction
+
+The first measurement of this record's own trade-off exists. It was taken on a
+freshly rebuilt index whose corpus coverage is complete — 43 of 43 expected
+paths present, so the reachable hit ceiling is 100% and nothing below is
+explained by a missing chunk. Fifty-five calibration cases, Ollama
+`nomic-embed-text`, through the compiled MCP binary:
+
+| | |
+|---|---|
+| Hit@4 (45 positives) | **88.9%** |
+| MRR | 0.706 |
+| **False abstention** | **0%** |
+| **Correct abstention** (10 negatives) | **0%** |
+| p95 latency | 827 ms |
+
+**The stated negative consequence did not happen.** This record predicted that
+"conceptual questions with only a semantic neighbour now abstain" and called it
+"the intended false-positive trade-off". Measured, the false abstention rate is
+zero: the policy never once withheld a real answer. That fear was unfounded.
+
+**The stated positive consequence did not happen either.** This record claims
+"a nonexistent feature stops being presented as four relevant files". All ten
+negatives returned files:
+
+```
+Where does Umbra expose a Prometheus metrics endpoint?
+  -> src/core/rag/retrieval-metrics.ts, src/core/agent/deep-agent-factory.ts
+Where is the MongoDB document store for chunks configured?
+  -> src/core/rag/lexical-index.ts, src/core/agent/factory.ts
+Where are indexing events published to a Kafka topic?
+  -> src/presentation/mcp/tool-catalog.ts, src/presentation/mcp/start-mcp-server.ts
+```
+
+The mechanism is visible in the data. Grounding requires a candidate present in
+both rankings, and the **common** words of these queries — *metrics*,
+*endpoint*, *store*, *chunks*, *configured*, *events*, *published* — produce
+both lexical and semantic hits in a repository that genuinely has metrics,
+stores, chunks and events. A candidate therefore appears in both lists and
+passes. Meanwhile the one term that actually discriminates — *Prometheus*,
+*MongoDB*, *Kafka* — matches nothing anywhere, and nothing in the policy
+requires it to.
+
+Rank fusion agreement is a test of *consistency between two retrievers*, not of
+*evidence for the question*. Two retrievers can agree confidently about a
+document that has nothing to do with the subject, because they agree about the
+filler.
+
+**Nothing is retracted about the rest of the design.** Fusing rank positions
+rather than mixing cosine and BM25 values remains correct, and never comparing
+across vector spaces remains correct. What is wrong is only the grounding
+predicate.
+
+The correction is not implemented by this amendment, and the direction is
+deliberately recorded rather than chosen: the portable form is to require a
+match on a query term the index shows to be *rare*, which the FTS index can
+answer from its own document frequencies — no threshold fitted to one
+repository, which is the criterion this record set for itself.
+
+Until then, `ask_codebase` will answer a question about a feature that does not
+exist. That is a live defect, and it is now measured rather than suspected.
+
+See `docs/benchmarks/results/2026-09-08-ollama-calibration.json` for the run,
+and [ADR-031](./ADR-031-measure-before-building.md) for why it could not have
+been measured before.
