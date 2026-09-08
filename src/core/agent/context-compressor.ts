@@ -33,13 +33,24 @@
 import { HumanMessage, AIMessage } from '@langchain/core/messages';
 import { LLMProvider } from '../llm/provider';
 import { isOllamaModel } from '../config/model-resolver';
+import { tokenCounter } from '../llm/tokens/token-counter';
+import type { CountableTool } from '../llm/tokens/token-counter.port';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 /**
- * Default maximum estimated token budget before proactive compression fires.
+ * Default maximum token budget before proactive compression fires.
  *
- * Using chars/4 as a token estimate. 80,000 tokens ≈ 320,000 characters.
+ * ~~Using chars/4 as a token estimate. 80,000 tokens ≈ 320,000 characters.~~
+ * **Amended for ADR-031 phase 2:** the count is now a real BPE count of the
+ * whole request, so the threshold no longer converts to a character figure.
+ * The value is unchanged at 80,000, deliberately: changing the counter and the
+ * budget in the same commit would make it impossible to tell which one moved
+ * the behaviour. Note that the number it is compared against is now *larger*
+ * for the same conversation, because tool-call arguments and framing were
+ * previously uncounted — so compression fires earlier than it used to, which
+ * is the correction, not a regression.
+ *
  * This is well under the gemini-2.5-flash-lite 1M token context window but
  * aggressive enough to prevent "model output must contain" crashes (ADR-024).
  *
@@ -92,28 +103,38 @@ export class ContextCompressor {
   // ── Public API ──────────────────────────────────────────────────────────────
 
   /**
-   * Estimates the token count of a messages array using the `chars / 4` heuristic.
+   * Counts the tokens a messages array will cost on the next request.
    *
-   * Zero external dependencies. Accuracy is sufficient for a budget guard
-   * (within ~20% of the real count for English + code content).
+   * ## Amended for ADR-031 phase 2
+   * This was `chars / 4` over `msg.content` alone, and both halves of that were
+   * a problem. The ratio was wrong by a content-dependent factor — over 20% on
+   * ordinary TypeScript — and, more seriously, `content` is not the request.
+   * An `AIMessage` that calls a tool carries its arguments in `tool_calls`, so
+   * a turn that wrote a large file counted as nearly free, and the per-message
+   * framing a provider adds was never charged at all.
    *
-   * Counts text from all message types (Human, AI, Tool) to get a realistic
-   * total including tool call results, which are the main driver of context growth.
+   * It now delegates to {@link TokenCounterPort}, which uses a real BPE encoder
+   * and counts tool-call arguments and framing. `overhead` lets a caller that
+   * knows the system prompt and tool catalog include them; a deep agent's tool
+   * schemas are thousands of fixed tokens on every request, and no current call
+   * site has them to hand — which is exactly why the budget has always been
+   * measured against a number smaller than the thing it guards.
    *
    * @param messages - Raw messages array from agent state.
-   * @returns Estimated token count.
+   * @param overhead - The system prompt and tool definitions, when known.
+   * @returns Token count.
    */
-  public static estimateTokens(messages: unknown[]): number {
+  public static estimateTokens(
+    messages: unknown[],
+    overhead?: { system?: string; tools?: readonly CountableTool[] },
+  ): number {
     if (!messages || messages.length === 0) return 0;
 
-    let totalChars = 0;
-    for (const msg of messages) {
-      // Handle both class instances and plain objects from LangGraph state
-      const content = (msg as Record<string, unknown>)?.content;
-      totalChars += ContextCompressor.extractText(content).length;
-    }
-
-    return Math.ceil(totalChars / 4);
+    return tokenCounter().countRequest({
+      messages,
+      system: overhead?.system,
+      tools: overhead?.tools,
+    }).total;
   }
 
   /**
@@ -127,7 +148,8 @@ export class ContextCompressor {
    * to trigger proactive compression after each turn (ADR-024).
    *
    * @param messages - Raw messages array from agent state.
-   * @returns True if the estimated token budget is exceeded.
+   * @param overhead - The system prompt and tool definitions, when known.
+   * @returns True if the token budget is exceeded.
    *
    * @example
    * ```ts
@@ -137,10 +159,13 @@ export class ContextCompressor {
    * }
    * ```
    */
-  public static isOverBudget(messages: unknown[]): boolean {
+  public static isOverBudget(
+    messages: unknown[],
+    overhead?: { system?: string; tools?: readonly CountableTool[] },
+  ): boolean {
     const budget = parseInt(process.env.MAX_CONTEXT_TOKENS ?? '', 10);
     const threshold = Number.isFinite(budget) && budget > 0 ? budget : DEFAULT_TOKEN_BUDGET;
-    return ContextCompressor.estimateTokens(messages) > threshold;
+    return ContextCompressor.estimateTokens(messages, overhead) > threshold;
   }
 
   /**
