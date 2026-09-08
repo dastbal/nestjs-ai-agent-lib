@@ -56,6 +56,26 @@ describe('IndexerService durable file outcomes', () => {
     expect(files.total).toBe(0);
   });
 
+  it('commits chunks and vectors for a classless TypeScript module', async () => {
+    fs.writeFileSync(
+      path.join(rootDir, 'src', 'sample.ts'),
+      'export function resolveRoot(value: string): string { return value.trim(); }\n',
+      'utf8',
+    );
+    const indexer = new IndexerService(successfulEmbeddings());
+
+    const result = await indexer.indexProject();
+    const db = new Database(path.join(rootDir, '.umbra', 'memory.db'), { readonly: true });
+    const chunks = db.prepare('SELECT COUNT(*) AS total FROM code_chunks').get() as { total: number };
+    const vectors = db.prepare('SELECT COUNT(*) AS total FROM chunk_vectors').get() as { total: number };
+    db.close();
+
+    expect(result).toMatchObject({ status: 'complete', filesIndexed: 1 });
+    expect(chunks.total).toBeGreaterThan(0);
+    expect(vectors.total).toBe(chunks.total);
+    expect(readIndexStamp(rootDir)).toMatchObject({ status: 'complete', coveredFiles: 1 });
+  });
+
   it('persists an explicit skipped outcome for intentionally empty source', async () => {
     fs.writeFileSync(path.join(rootDir, 'src', 'sample.ts'), ' \n\t', 'utf8');
     const indexer = new IndexerService(successfulEmbeddings());

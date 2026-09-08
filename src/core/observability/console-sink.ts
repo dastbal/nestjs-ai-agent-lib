@@ -101,7 +101,7 @@ export function writeFragment(fragment: string): void {
  * @returns Nothing.
  */
 export function writeTransientLine(line: string): void {
-  if (activeSink === defaultSink && process.stdout.isTTY) {
+  if (isInteractiveTerminal()) {
     const fitted = fitTerminalProgress(line);
     process.stdout.write(`\r\u001b[2K${colorizeTransientProgress(fitted)}`);
     return;
@@ -111,7 +111,12 @@ export function writeTransientLine(line: string): void {
 
 /** Finishes an interactive transient line before durable output is written. */
 export function finishTransientLine(): void {
-  if (activeSink === defaultSink && process.stdout.isTTY) process.stdout.write('\n');
+  if (isInteractiveTerminal()) process.stdout.write('\n');
+}
+
+/** Whether Umbra owns an interactive terminal row that it may repaint. */
+export function isInteractiveTerminal(): boolean {
+  return activeSink === defaultSink && process.stdout.isTTY === true;
 }
 
 /**

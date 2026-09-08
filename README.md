@@ -811,7 +811,8 @@ searchable.
 
 Umbra discovers TypeScript source from package `tsconfig.json` files and workspace
 declarations, not from a guessed root `src/`. It ignores dependency/build trees,
-indexes `.ts` and `.tsx`, and keeps all stored paths relative to the fixed
+indexes `.ts` and `.tsx` including classless utility/configuration modules, and
+keeps all stored paths relative to the fixed
 `--root`. If a repository's declared source boundary needs an explicit override,
 commit an `umbra.json` at its root:
 

@@ -2,7 +2,12 @@ import { FileRegistry } from '../state/file-registry';
 import { NestChunker } from '../tools/ast/chunker';
 import { AgentDB } from '../state/db';
 import { runtimeRoot } from '../config/runtime-root';
-import { finishTransientLine, writeLine, writeTransientLine } from '../observability/console-sink';
+import {
+  finishTransientLine,
+  isInteractiveTerminal,
+  writeLine,
+  writeTransientLine,
+} from '../observability/console-sink';
 import { EmbeddingsPort } from './embeddings';
 import { resolveEmbeddings } from './embeddings/embeddings-resolver';
 import { readIndexStamp, writeIndexStamp } from './index-stamp';
@@ -72,6 +77,18 @@ export class IndexerService {
     if (!IndexerService.hasTransientProgress) return;
     finishTransientLine();
     IndexerService.hasTransientProgress = false;
+  }
+
+  /** Keeps repeated TTY failures in the transient row, while logs retain detail. */
+  private static failure(message: string): void {
+    if (IndexerService.silent) return;
+    if (isInteractiveTerminal()) {
+      writeTransientLine(message);
+      IndexerService.hasTransientProgress = true;
+      return;
+    }
+    IndexerService.finishProgress();
+    writeLine(message);
   }
 
   // Optimization: Send chunks to Vertex AI in groups to respect rate limits and improve speed.
@@ -240,10 +257,12 @@ export class IndexerService {
         const outcome = await this.indexSingleFile(file, position + 1, filesToProcess.length);
         if (outcome === 'indexed') indexedFiles += 1;
       } catch (error: unknown) {
-        IndexerService.finishProgress();
         const message = error instanceof Error ? error.message : String(error);
         failures.push(`${file.relativePath}: ${message}`);
-        writeLine(`❌ Indexing ${file.relativePath} was not committed: ${message}`);
+        IndexerService.failure(
+          `❌ ${position + 1}/${filesToProcess.length} pending | ` +
+            `${compactPath(file.relativePath, 22).padEnd(22)} | ${shortFailureReason(message)}`,
+        );
       }
     }
 
@@ -253,7 +272,7 @@ export class IndexerService {
     IndexerService.finishProgress();
     IndexerService.log(
       failures.length > 0
-        ? `⚠️  Indexing finished with ${failures.length} uncommitted file(s) — rerun after fixing embeddings.`
+        ? `⚠️  Indexing partial — ${failures.length} file(s) remain pending. Run \`umbra doctor --index\` after fixing the reported cause.`
         : '✅ Indexing Complete.',
     );
     writeIndexStamp(rootDir, identity, {
@@ -816,6 +835,13 @@ export class IndexerService {
     runMany(edges);
   }
 
+}
+
+/** Makes a transient failure stable-width without repeating implementation detail. */
+function shortFailureReason(message: string): string {
+  if (message.includes('produced zero index chunks')) return 'chunking produced no output';
+  if (message.includes('Embedding provider returned')) return 'embedding response invalid';
+  return message.length > 32 ? `${message.slice(0, 31)}…` : message;
 }
 
 /** Formats elapsed indexing work without exposing implementation-specific timestamps. */

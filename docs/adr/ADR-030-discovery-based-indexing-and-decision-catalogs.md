@@ -344,6 +344,45 @@ the lease. A `complete` stamp is healthy only when those facts agree.
 - Focused index/MCP suites: 14 tests passed. `tsc --noEmit` and
   `git diff --check` passed.
 
+## Amendment — 2026-09-08 · Classless modules are source, not empty index work
+
+`NestChunker#processLogicFile` originally emitted chunks only for classes and
+their methods. Valid infrastructure modules such as CLI entry points, MCP root
+resolvers, and configuration adapters commonly export top-level functions and
+constants instead. They were discovered as source, but produced zero chunks;
+the durable-index rule correctly left them pending, which made every retry fail
+without reaching the embedding provider.
+
+`NestChunker#analyze` now emits one `file` chunk for any nonempty source that
+the class/atomic strategies did not cover. `splitChunksForEmbedding` remains
+the size boundary, so a large module is split before embedding rather than
+being dropped or stored as an oversized vector input. Empty or whitespace-only
+sources remain chunkless and retain their explicit `skipped` outcome.
+
+`IndexerService#failure` keeps repeated file failures in its repaintable TTY
+row. It writes individual messages only to noninteractive logs, then one final
+partial-index summary. This preserves the diagnosis outside a terminal without
+turning an interactive run into one permanent line per file.
+
+### Verification evidence
+
+- `chunker.spec.ts` covers a classless module fallback and whitespace source.
+- `indexer.spec.ts` proves a classless module commits chunks and vectors under
+  the existing per-file transaction.
+- `indexer-progress.spec.ts` proves two TTY failures repaint the same row and
+  append no per-file console line.
+- Focused suites: 3 suites and 7 tests passed; `tsc --noEmit` passed.
+
+### Related files
+
+- `src/core/tools/ast/chunker.ts` — `NestChunker#analyze`.
+- `src/core/tools/ast/chunker.spec.ts` — module fallback coverage.
+- `src/core/rag/indexer.ts` — `IndexerService#failure` and
+  `IndexerService#indexDiscoveredProject`.
+- `src/core/rag/indexer.spec.ts` — durable classless-module vectors.
+- `src/core/rag/indexer-progress.spec.ts` — repaint contract.
+- `src/core/observability/console-sink.ts` — `isInteractiveTerminal`.
+
 ## Related files
 
 - `src/core/config/workspace-discovery.ts` — proposed `WorkspaceDiscoveryService`.
