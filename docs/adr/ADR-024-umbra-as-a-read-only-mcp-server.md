@@ -725,8 +725,10 @@ The user-scoped configuration emitted by
 one-time documented flow is `npm install -g @dastbal/umbra` followed by
 `umbra setup mcp`, `umbra setup codex`, or `umbra setup claude`. This makes the
 server executable available before the client starts its MCP grace window.
-Project-local `umbra init` configuration remains an explicit `npx` flow; no
-install hook or consumer configuration write was introduced.
+An explicit `npx ... init` remains a manual way to invoke the CLI, but accepting
+its optional MCP prompt follows this same user-scoped adapter flow. It does not
+write a project-local `.mcp.json`; no install hook or consumer configuration
+write was introduced.
 
 ### Verification evidence
 
@@ -873,3 +875,55 @@ activation and background-index path applies unchanged.
   pre-root status and tool gates.
 - `src/presentation/mcp/sdk-loader.ts` — minimal typed Roots capability.
 - `src/bin/cli.ts` — CWD-first auto-root with Roots fallback.
+
+---
+
+### 14 — 2026-09-08 · Global MCP bootstrap is safe, and its runtime is complete
+
+The former project-local configuration writer
+`ensureUmbraMcpConfiguration` and its root-pinned `configureCodexMcp` companion
+have been removed. Umbra now owns only the verified user-scoped Codex and Claude
+adapters, and generic clients receive a copyable stdio definition. In
+particular, `umbra init` and `umbra setup` never edit an existing local
+`.mcp.json`.
+
+The original top-level decision language remains historical. The current
+boundary is more precise: MCP exposes no chat model, agent loop, command tool,
+write tool, or caller-selected filesystem path. Once a client has declared one
+trusted root, startup may create only that root's `.umbra/` state and
+`.gitignore` entry, then call the configured embedding provider in background.
+Those bootstrap actions are not MCP tool capabilities. Before root validation,
+the server remains connected and root-gated without creating state or probing a
+provider.
+
+The clean-package smoke also found that CLI startup imports TypeScript through
+workspace discovery before it can print help or accept MCP. `typescript@5.9.3`
+is therefore an exact production dependency alongside the required
+`@modelcontextprotocol/sdk@1.30.0`; treating it as a development-only package
+would make a global installation fail before its first response.
+
+### Verification evidence
+
+- `mcp-config.spec.ts` asserts the global binary contract, Windows Claude
+  wrapper, absence of a local `.mcp.json` writer, and both runtime dependencies.
+- Full Jest run: 89 suites passed, 1 skipped; 797 tests passed, 5 skipped.
+  `tsc --noEmit` and the production build passed.
+- A fresh `npm pack` tarball was installed with `--omit=dev --ignore-scripts`.
+  Its `umbra --help` command completed with exit 0.
+- The installed tarball completed a rootless JSON-RPC initialize plus
+  `tools/list` exchange with stdout containing only JSON-RPC and exactly the
+  five stable tools. The empty client directory gained neither `.umbra/` nor
+  `.gitignore`.
+- Host-level client-registration smoke remains explicitly unverified on this
+  machine: the installed Codex CLI cannot resolve its home directory and no
+  Claude executable is present. The adapter command contracts are covered by
+  unit tests; no temporary client entry was left behind.
+
+### Related files
+
+- `package.json` and `package-lock.json` — complete CLI runtime closure.
+- `src/core/config/mcp-config.ts` — global-only verified adapters.
+- `src/core/config/mcp-config.spec.ts` — runtime and no-local-writer contract.
+- `src/bin/cli.ts` — accurate global MCP wording during manual initialization.
+- `README.md` and `src/presentation/mcp/README.md` — current activation,
+  coverage, and removal semantics.

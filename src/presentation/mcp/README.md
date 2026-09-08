@@ -12,16 +12,20 @@ Google account, are [ADR-025](../../../docs/adr/ADR-025-embeddings-are-chosen-no
 
 ```bash
 umbra mcp --root /path/to/repo
+# Global client registration uses this safe root-resolution mode:
+umbra mcp --auto-root
 ```
 
 | Flag | Meaning |
 |---|---|
-| `--root <path>` | **Required.** The repository to serve. Fixed at launch; no tool argument can change it |
-| `--embeddings <vertex\|ollama>` | Embedding provider for semantic search. Default: whatever `.umbra/agent.config.json` says, else `vertex` |
+| `--root <path>` | Explicit repository to serve. Fixed for the process; no tool argument can change it |
+| `--auto-root` | Use Claude's declared project, a validated client working directory, or exactly one MCP `file:` root after handshake |
+| `--embeddings <vertex\|ollama>` | Embedding provider for semantic search. Default: whatever `.umbra/agent.config.json` says, else `ollama` |
 | `--no-index` | Skip warming the semantic index at launch |
 
 Registering it with a client is one entry pointing at the binary with those
-arguments. Removing it is deleting that entry — there is nothing else to undo.
+arguments. Removing it deletes that client entry; any root already activated
+keeps only its local, gitignored `.umbra/` cache and `.gitignore` rule.
 
 ## What it publishes
 
@@ -30,31 +34,33 @@ arguments. Removing it is deleting that entry — there is nothing else to undo.
 | Tool | `list_adrs` | free |
 | Tool | `query_dependency_graph` | free |
 | Tool | `run_integrity_check` | free (runs `tsc --noEmit`) |
-| Tool | `ask_codebase` | embeds the query — **published only when embeddings are available** |
+| Tool | `ask_codebase` | embeds the query after durable vector coverage is proven |
+| Tool | `get_index_status` | free lifecycle and durable coverage evidence |
 | Resource | `umbra://adr-index` | free |
 | Resource | `umbra://index-status` | free |
 | Prompt | one per `skills/*.md` | free |
 
-`ask_codebase` is advertised conditionally on purpose. Telling a foreign model
-about a tool that fails on first use is the defect
-[ADR-013](../../../docs/adr/ADR-013-subagent-tool-exclusion-and-provider-diagnostics.md)
-recorded, and it is worse here because the tool list is fixed at launch and
-cannot be corrected mid-session. When it is withheld, `stderr` says why and
-names the command that fixes it.
+The catalog is fixed before handshake. `ask_codebase` is therefore always
+advertised, but returns a typed retryable status until `get_index_status` shows
+durable coverage. This avoids a stale client tool list while never pretending a
+partial index can answer.
 
 ## The five constraints this module exists to honour
 
-1. **No model.** Nothing here instantiates a chat model, builds a prompt, or
-   runs an agent loop. The only model call in the whole mode is the embedding
-   inside `ask_codebase`.
-2. **No writes.** Not caution — `requestApproval` suspends a run by raising a
-   LangGraph `interrupt()`, which exists only inside a graph run. No graph, no
-   interrupt, no approval channel, therefore nothing that writes can be exposed.
-3. **The root is pinned at launch**, never read from a tool argument. That is
+1. **No chat model.** Nothing here instantiates a chat model, builds a prompt,
+   or runs an agent loop. Embedding calls are limited to background index warm-up
+   and semantic retrieval.
+2. **No write tools.** No MCP tool can write, request approval, or choose a
+   filesystem path. After a trusted root is accepted, startup may create its
+   local index state and protect it in `.gitignore`; that activation is not
+   client-directed and is outside the published tool surface.
+3. **The root is pinned before any root-bound tool runs**, never read from a tool argument. That is
    why `run_integrity_check` has an empty schema: accepting a path would reopen
    the traversal surface ADR-011 closed and hand it to a remote caller.
 4. **`stdout` belongs to the protocol.** See below.
-5. **The index must be warm**, and its state is reported rather than assumed.
+5. **Semantic results require durable coverage.** The MCP handshake and status
+   tool never wait for warm-up; only `ask_codebase` is retryable until coverage
+   is proven.
 
 ## `stdout` discipline — read this before adding anything
 
@@ -113,7 +119,7 @@ server does not publish.
 basis — the same posture as `toSafeEvent` in `ai-agent-http.module.ts`, where an
 unrecognised event is dropped rather than forwarded and hoped for.
 
-## The MCP SDK is used, and it is optional
+## The MCP SDK is a required runtime dependency
 
 > **Corrected.** This section used to explain why there was *no* SDK
 > dependency, on the premise that `@modelcontextprotocol/sdk` was ESM-only and
@@ -129,19 +135,14 @@ capability advertisement, the handshake, and the JSON Schema it derives from the
 zod shapes in `tool-catalog.ts`. About 400 lines of hand-written protocol are
 gone.
 
-It is declared as an **optional peer dependency**, because it is 5.7 MB plus
-~6.9 MB of transitive packages — `hono`, `ajv`, `jose`, `express`, `cors`,
-`eventsource` — and a consumer who installs `@dastbal/umbra` for its NestJS
-module should not pay 12 MB for a protocol they never speak.
-
-`peerDependencies` + `peerDependenciesMeta.optional`, not
-`optionalDependencies`: the latter installs, and the point is that the consumer
-chooses. `sdk-loader.ts` requires it lazily and, when absent, prints the install
-command and exits rather than showing a module-resolution stack trace.
+It is declared as an exact production dependency. A global `umbra mcp` command
+must work before a client allows its first handshake, so an optional peer is not
+an acceptable installation contract. `sdk-loader.ts` still requires its small
+stdio server surface lazily and reports a concrete Umbra reinstall command if a
+package installation is damaged.
 
 ```bash
-npm i @modelcontextprotocol/sdk               # local
-npm i -g @dastbal/umbra @modelcontextprotocol/sdk   # global CLI install
+npm i -g @dastbal/umbra
 ```
 
 ### Three behaviours that changed with the swap
@@ -163,9 +164,9 @@ improvement, the third trades a helpful message for a standard one.
 | File | Role |
 |---|---|
 | `mcp.contracts.ts` | DTOs and closed unions. Imports nothing from `src/core/` |
-| `sdk-loader.ts` | Lazy, optional `require` of the SDK, plus the install hint |
+| `sdk-loader.ts` | Lazy `require` of the required SDK, plus the damaged-install hint |
 | `sdk-server.ts` | Registers the catalogs on the SDK's `McpServer` |
-| `tool-catalog.ts` | The four tools, with zod shapes the SDK turns into JSON Schema |
+| `tool-catalog.ts` | The five stable tools, with zod shapes the SDK turns into JSON Schema |
 | `resource-catalog.ts` | `umbra://adr-index`, `umbra://index-status` |
 | `prompt-catalog.ts` | `skills/*.md` as prompts |
 | `dto-mapper.ts` | The boundary: refusals translated, hints stripped, provenance added |

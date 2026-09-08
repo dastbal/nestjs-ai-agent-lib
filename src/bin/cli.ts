@@ -563,7 +563,7 @@ program
     }
 
     const enableMcp = await confirm({
-      question: 'Configure Umbra as this project\'s read-only MCP server for detected clients?',
+      question: 'Configure global Umbra MCP for detected clients? It activates later in each validated project.',
       defaultValue: false,
       yesLabel: 'Enable MCP server',
       noLabel: 'Not now',

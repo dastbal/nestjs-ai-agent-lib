@@ -180,7 +180,8 @@ function publishIntegrityCheck(): PublishedTool {
 /**
  * Builds the `ask_codebase` publication.
  *
- * Published only when embeddings are available; see `buildToolCatalog`.
+ * Always published in the stable catalog. Until durable coverage is ready, its
+ * handler returns a typed retryable status rather than querying partial data.
  *
  * @param decorate - Adds index provenance to a successful answer.
  * @returns The published tool.
