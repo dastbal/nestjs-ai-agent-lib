@@ -1363,3 +1363,54 @@ model. The first is the honest one: it measures ranking, and says so.
 4. Add the job to `test.yml` as a **reporting** step first, and only make it
    blocking once a few runs establish what the normal variance is. A gate that
    fails on noise gets disabled within a week.
+
+---
+
+## A corpus health check, because a negative case rots silently
+
+> Deferred 2026-09-08 after the abstention fix. The failure was observed, the
+> guard was not built.
+
+### The idea
+
+`bench-retrieval` already refuses to score a corpus the index cannot answer —
+`assessCorpusCoverage` reports expected paths with no chunk. The mirror check
+for negatives does not exist: report any negative case whose every subject term
+is present in the indexed source, because such a case can no longer prove
+anything about abstention.
+
+### What is actually missing
+
+A negative case is only a negative while the repository stays ignorant of its
+subject. That property is destroyed by ordinary work, and silently:
+
+- `negative-prometheus` stopped being a negative because the TSDoc of
+  `unknown-terms.ts` — written to explain the very defect it proved — named the
+  term. The repository then contained it, the rule correctly called it known,
+  and that case was the one negative still failing the next run. Cause and
+  effect were three hours apart.
+- `negative-redis` was never catchable by term absence at all: `redis` genuinely
+  appears in this repository's source. That one is a fair hard case, not rot,
+  and the check must be able to say so.
+
+Without the guard, a corpus quietly loses its negatives and the correct
+abstention rate drifts up for no reason anyone can see.
+
+### The mechanism to reuse
+
+`findUnknownTerms` already answers exactly this question, and
+`assessCorpusCoverage` is the precedent for the reporting shape — a `null` where
+a rate has no denominator, a named list where something is missing.
+
+### Plan
+
+1. Add `assessNegativeHealth(db, cases)` beside `assessCorpusCoverage`: for each
+   negative, the subject terms the index does not contain. Zero such terms means
+   the case is unprovable.
+2. Print it in the runner's preflight and store it in the report, next to
+   coverage.
+3. Allow a case to declare `unprovableByAbsence: true`, so a deliberately hard
+   negative such as `negative-redis` is not reported as rot every run.
+4. Consider failing the run when a case that used to be provable stops being
+   so — that requires comparing against the previous committed report, which is
+   the first thing the results directory makes possible.
