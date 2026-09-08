@@ -30,6 +30,7 @@ import {
 import { buildEvidenceProtocolPrompt } from './evidence-protocol';
 import { groundedAnalysisSchema } from './evidence-protocol';
 import { collectWorkspaceEvidence, formatWorkspaceEvidence } from './workspace-evidence';
+import { recordSessionOverhead } from './session-overhead';
 import { LLMProvider } from '../llm/provider';
 import { OllamaChatAdapter } from '../llm/ollama-adapter';
 import { buildOllamaWarning } from '../../presentation/cli/theme';
@@ -232,6 +233,14 @@ export class DeepAgentFactory {
 
     const modelParam = DeepAgentFactory.resolveRuntimeModel(model);
 
+    const tools = resolveCapabilityTools(profile.capabilities);
+
+    // The prompt and the catalog are charged on every turn of this session and
+    // change on none of them. Recorded here because this is the only place that
+    // holds both; without it the context budget measures the conversation and
+    // ignores its own fixed cost (ADR-031 phase 2).
+    recordSessionOverhead(systemPrompt, tools);
+
     const agent = createDeepAgent({
       model: modelParam as any,
       systemPrompt,
@@ -240,7 +249,7 @@ export class DeepAgentFactory {
         limits: { maxCostUsd: agentConfig.limits.maxCostUsd },
         costOf: DeepAgentFactory.buildCostResolver(model),
       })],
-      tools: resolveCapabilityTools(profile.capabilities) as any[],
+      tools: tools as any[],
     });
     return registerAgentKernelTelemetry(agent, [profile]);
   }
@@ -368,6 +377,16 @@ export class DeepAgentFactory {
       .filter((profile) => profile.workflowRole === 'advisory')
       .map((profile) => profile.id);
 
+    const supervisorTools = resolveCapabilityTools(supervisorProfile.capabilities, {
+      delegateTool,
+      escalateRouteTool,
+    });
+
+    // The supervisor's own fixed cost, recorded for the same reason as on the
+    // single-agent path. A delegate's narrower catalog is deliberately not
+    // recorded: the turn is charged for what the supervisor carries.
+    recordSessionOverhead(systemPrompt, supervisorTools);
+
     const agent = createDeepAgent({
       model: modelParam as any,
       systemPrompt,
@@ -388,10 +407,7 @@ export class DeepAgentFactory {
           advisoryRoleIds,
         }),
       ] as any[],
-      tools: resolveCapabilityTools(supervisorProfile.capabilities, {
-        delegateTool,
-        escalateRouteTool,
-      }) as any[],
+      tools: supervisorTools as any[],
     });
     return registerAgentKernelTelemetry(agent, [supervisorProfile, ...subagentProfiles]);
   }

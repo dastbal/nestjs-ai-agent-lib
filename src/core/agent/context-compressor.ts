@@ -34,6 +34,7 @@ import { HumanMessage, AIMessage } from '@langchain/core/messages';
 import { LLMProvider } from '../llm/provider';
 import { isOllamaModel } from '../config/model-resolver';
 import { tokenCounter } from '../llm/tokens/token-counter';
+import { sessionOverhead } from './session-overhead';
 import type { CountableTool } from '../llm/tokens/token-counter.port';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -114,11 +115,13 @@ export class ContextCompressor {
    * framing a provider adds was never charged at all.
    *
    * It now delegates to {@link TokenCounterPort}, which uses a real BPE encoder
-   * and counts tool-call arguments and framing. `overhead` lets a caller that
-   * knows the system prompt and tool catalog include them; a deep agent's tool
-   * schemas are thousands of fixed tokens on every request, and no current call
-   * site has them to hand — which is exactly why the budget has always been
-   * measured against a number smaller than the thing it guards.
+   * and counts tool-call arguments and framing. `overhead` defaults to what
+   * {@link sessionOverhead} recorded when the agent was built: a deep agent's
+   * tool schemas are thousands of fixed tokens on every request, and no call
+   * site had them to hand — which is exactly why the budget was always measured
+   * against a number smaller than the thing it guards. Reading the recorded
+   * value rather than threading it through every caller means the count is
+   * right for all of them, not only for the one that remembered to pass it.
    *
    * @param messages - Raw messages array from agent state.
    * @param overhead - The system prompt and tool definitions, when known.
@@ -126,7 +129,7 @@ export class ContextCompressor {
    */
   public static estimateTokens(
     messages: unknown[],
-    overhead?: { system?: string; tools?: readonly CountableTool[] },
+    overhead: { system?: string; tools?: readonly CountableTool[] } = sessionOverhead(),
   ): number {
     if (!messages || messages.length === 0) return 0;
 
@@ -161,7 +164,7 @@ export class ContextCompressor {
    */
   public static isOverBudget(
     messages: unknown[],
-    overhead?: { system?: string; tools?: readonly CountableTool[] },
+    overhead: { system?: string; tools?: readonly CountableTool[] } = sessionOverhead(),
   ): boolean {
     const budget = parseInt(process.env.MAX_CONTEXT_TOKENS ?? '', 10);
     const threshold = Number.isFinite(budget) && budget > 0 ? budget : DEFAULT_TOKEN_BUDGET;

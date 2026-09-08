@@ -1414,3 +1414,49 @@ a rate has no denominator, a named list where something is missing.
 4. Consider failing the run when a case that used to be provable stops being
    so — that requires comparing against the previous committed report, which is
    the first thing the results directory makes possible.
+
+---
+
+## Routing a turn by its size, which ADR-002 currently forbids
+
+> Deferred 2026-09-08 while finishing ADR-031 phase 2. Named as a phase-2 goal
+> in that record; deliberately not built, because building it would contradict
+> an accepted decision without saying so.
+
+### The idea
+
+With a pre-call token count, an oversized request could be sent to a model that
+can hold it — *"this prompt is 40k, it does not fit the local model, send it to
+the cloud one"* — instead of failing.
+
+### Why it is not simply an improvement
+
+[ADR-002](./adr/ADR-002-model-routing-and-bounded-analysis.md) fixes model
+resolution as `--model` > `AGENT_MODEL` > project profile, and says an
+orchestrator role resolves its own profile without reading the environment
+variable. Size-based routing inserts a rung the operator did not write, above
+the one they did. A user who typed `--model ollama:llama3.2` for privacy would
+silently have their prompt sent to Vertex — the failure being that it is
+*silent*, not that it is wrong.
+
+So this is not a phase-2 implementation detail. It is an amendment to ADR-002,
+and it needs David's decision on the question ADR-002 answered: whether anything
+may override an explicit model choice, and whether the operator is asked first.
+
+### What is actually missing besides the decision
+
+No per-model context window exists anywhere in the codebase. `DEFAULT_LLM_PRICING`
+in `src/core/infrastructure/config/default-pricing.ts` is the pattern to copy —
+a shipped table of published facts with a project-local JSON override, and the
+lesson already recorded there that a missing entry must not read as zero.
+
+### Plan
+
+1. Get the decision on ADR-002 first. Options worth putting to David: refuse and
+   explain; ask for approval once per session; route automatically only when the
+   operator expressed no explicit choice.
+2. Add `contextWindow` beside pricing, with the same override mechanism and the
+   same treatment of a missing entry — unknown, never "unlimited".
+3. Early rejection is the half that needs no decision: a request already known
+   to exceed the window can be refused before the round trip, whatever the
+   routing policy turns out to be. It is blocked only on the window table.
