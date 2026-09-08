@@ -257,3 +257,52 @@ second choice before `IndexerService#indexProject` is called.
 - `docs/adr/ADR-025-embeddings-are-chosen-not-assumed.md` — the record this amends
 - `docs/adr/ADR-026-vectors-are-numbers-and-the-database-can-count.md` — what makes the change recoverable
 - `docs/benchmarks/embedding-retrieval-corpus.json` — the comparison that has not run
+
+---
+
+## Amendment — 2026-09-08 · The paired comparison ran on a clean index, and the free default holds
+
+The earlier amendment recorded 30% Hit@4 for both providers and declined to
+call a winner. That number is now known to have been bounded by index coverage
+rather than by either model: 24 of the 43 distinct expected paths had no chunk
+at all, so no retriever could have exceeded roughly 44%. See
+[ADR-031](./ADR-031-measure-before-building.md).
+
+Re-run on a rebuilt index with complete coverage (43/43 expected paths, so the
+reachable ceiling is 100%), 55 calibration cases each, both providers queried
+through fresh compiled MCP processes in the same run:
+
+| | Ollama `nomic-embed-text` | Vertex `text-embedding-004` |
+|---|---|---|
+| Hit@4 (45 positives) | **88.9%** | 86.7% |
+| MRR | 0.706 | **0.759** |
+| False abstention | 0% | 0% |
+| Correct abstention (10 negatives) | 0% | 0% |
+| p95 latency | 2,102 ms | **717 ms** |
+
+**The Hit@4 gap is one case out of forty-five** — 40 against 39. That is not a
+quality difference, and this amendment does not claim one. What the two columns
+do show is a real difference in *shape*: Vertex ranks the right file higher when
+it finds it, and Ollama finds it slightly more often.
+
+**The free default is not a quality compromise.** That was the open question
+this record left, and the answer is that the credential-free provider is
+competitive on this corpus. ADR-027 stands as written.
+
+**The latency column is not a fair comparison and must not be quoted as one.**
+Both servers ran on one machine in a single paired invocation, so Ollama's
+local CPU embedding competed with the benchmark itself; its p95 was 827 ms in
+the solo run recorded the same day. Vertex trades a network round trip for
+someone else's hardware, which on a loaded laptop wins.
+
+**The finding that matters is in neither column.** Correct abstention is 0% for
+*both* providers, identically. A defect that reproduces exactly across two
+unrelated vector spaces is not in the embedding model; it is in the grounding
+policy. See the 2026-09-08 amendment to
+[ADR-028](./ADR-028-hybrid-retrieval-requires-evidence.md).
+
+Cost of this run: 1,022 embedding calls over 974,653 characters, authorized in
+advance for that exact count.
+
+Reports: `docs/benchmarks/results/2026-09-08-ollama-calibration.json` and
+`docs/benchmarks/results/2026-09-08-ollama-vertex-calibration.json`.
