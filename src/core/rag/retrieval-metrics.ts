@@ -180,6 +180,80 @@ export function summarizeSplit(
   };
 }
 
+/** What share of a corpus the index could answer at all, before ranking. */
+export interface CorpusCoverage {
+  /** Distinct paths the corpus expects to be findable. */
+  readonly expectedPaths: number;
+  /** How many of those have at least one chunk in the index. */
+  readonly coveredPaths: number;
+  /** The expected paths with no chunk, sorted, for the report. */
+  readonly missingPaths: readonly string[];
+  /** Positive cases whose every expected path is missing — unhittable by construction. */
+  readonly unreachableCases: readonly string[];
+  /**
+   * The highest hit rate ranking could possibly achieve on these cases.
+   * `1` when the index covers every expectation.
+   */
+  readonly reachableHitCeiling: number;
+}
+
+/**
+ * Reports how much of the corpus the index can answer before ranking is involved.
+ *
+ * ## Why a benchmark without this reports the wrong thing
+ * A positive case whose target file has no chunk cannot be hit by any
+ * retriever, however good. Folded into a hit rate it is indistinguishable from
+ * a ranking failure, and the resulting number measures index coverage while
+ * appearing to measure retrieval quality — so the obvious response, tuning the
+ * ranking, cannot move it.
+ *
+ * This is not hypothetical for this repository. The 30% Hit@4 recorded in
+ * ADR-027 and ADR-028 was taken before `fix(rag): index classless source
+ * modules`, when function-only modules such as `math.ts`, `hybrid-ranking.ts`
+ * and `embeddings-resolver.ts` produced no chunk at all. Many corpus positives
+ * pointed straight at them.
+ *
+ * Paths are compared by suffix on `/`-normalised strings, so a corpus written
+ * relative to the repository matches an index that stores either separator.
+ *
+ * @param cases - The corpus cases about to be run.
+ * @param indexedPaths - Every distinct file path that has at least one chunk.
+ * @returns The coverage assessment.
+ */
+export function assessCorpusCoverage(
+  cases: readonly RetrievalCorpusCase[],
+  indexedPaths: readonly string[],
+): CorpusCoverage {
+  const normalise = (value: string): string => value.split('\\').join('/');
+  const indexed = indexedPaths.map(normalise);
+
+  const isCovered = (expected: string): boolean => {
+    const target = normalise(expected);
+    return indexed.some((candidate) => candidate.endsWith(target));
+  };
+
+  const expected = new Set<string>();
+  for (const corpusCase of cases) {
+    for (const expectedPath of corpusCase.expectedPaths) expected.add(normalise(expectedPath));
+  }
+
+  const missingPaths = [...expected].filter((candidate) => !isCovered(candidate)).sort();
+
+  const positives = cases.filter((corpusCase) => corpusCase.expectedPaths.length > 0);
+  const unreachableCases = positives
+    .filter((corpusCase) => !corpusCase.expectedPaths.some(isCovered))
+    .map((corpusCase) => corpusCase.id);
+
+  return {
+    expectedPaths: expected.size,
+    coveredPaths: expected.size - missingPaths.length,
+    missingPaths,
+    unreachableCases,
+    reachableHitCeiling:
+      positives.length === 0 ? 1 : (positives.length - unreachableCases.length) / positives.length,
+  };
+}
+
 /**
  * Groups outcomes by their split and summarizes each one, plus an `all` row.
  *

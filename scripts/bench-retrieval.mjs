@@ -106,7 +106,40 @@ for (const [label, target] of [
   }
 }
 
-const { scoreCase, summarizeRun } = await import(pathToFileURL(metricsPath).href);
+const { assessCorpusCoverage, scoreCase, summarizeRun } = await import(
+  pathToFileURL(metricsPath).href
+);
+
+/**
+ * Reads the distinct file paths the index actually holds chunks for.
+ *
+ * Opened read-only and directly, rather than through a tool: Umbra's MCP
+ * surface reports counts, not the file list, and adding a tool so a benchmark
+ * can introspect would widen a read-only knowledge surface for a test's
+ * convenience (ADR-024).
+ *
+ * @param repositoryRoot - The repository being benchmarked.
+ * @returns Distinct `code_chunks.file_path` values, or `null` if unreadable.
+ */
+async function readIndexedPaths(repositoryRoot) {
+  const dbPath = path.join(repositoryRoot, '.umbra', 'memory.db');
+  if (!fs.existsSync(dbPath)) return null;
+  try {
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      return db
+        .prepare('SELECT DISTINCT file_path FROM code_chunks')
+        .all()
+        .map((row) => row.file_path);
+    } finally {
+      db.close();
+    }
+  } catch (error) {
+    console.error(`Coverage preflight skipped: ${error.message}`);
+    return null;
+  }
+}
 
 const corpus = JSON.parse(fs.readFileSync(corpusPath, 'utf8'));
 if (!Array.isArray(corpus.queries) || corpus.queries.length === 0) {
@@ -265,6 +298,20 @@ async function runProvider(provider) {
 
     const indexStatus = await waitForIndex(server, provider);
 
+    // Before scoring: how much of this corpus could the index answer at all?
+    // Without it, a case whose target file has no chunk is scored as a ranking
+    // failure, and the headline number measures coverage while looking like
+    // quality.
+    const indexedPaths = await readIndexedPaths(root);
+    const coverage = indexedPaths === null ? null : assessCorpusCoverage(cases, indexedPaths);
+    if (coverage && coverage.missingPaths.length > 0) {
+      console.error(
+        `${provider}: ${coverage.missingPaths.length} of ${coverage.expectedPaths} expected paths ` +
+          `have no chunk. No retriever can exceed ${(coverage.reachableHitCeiling * 100).toFixed(0)}% hit rate ` +
+          `on this run:\n  ${coverage.missingPaths.join('\n  ')}`,
+      );
+    }
+
     const outcomes = [];
     for (const item of cases) {
       const startedAt = performance.now();
@@ -299,6 +346,7 @@ async function runProvider(provider) {
       // Verbatim, so a later reader can tell whether two reports were taken
       // against the same index rather than assuming it.
       indexStatus,
+      coverage,
       summaries: summarizeRun(outcomes),
       outcomes,
     };
@@ -328,6 +376,13 @@ fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);
 // The headline is deliberately the per-split table, never one fused number.
 for (const providerReport of report.providers) {
   console.log(`\n${providerReport.provider} — ${providerReport.cases} cases`);
+  if (providerReport.coverage) {
+    const { coveredPaths, expectedPaths, reachableHitCeiling } = providerReport.coverage;
+    console.log(
+      `index covers ${coveredPaths}/${expectedPaths} expected paths — ` +
+        `reachable hit ceiling ${(reachableHitCeiling * 100).toFixed(0)}%`,
+    );
+  }
   console.table(
     providerReport.summaries.map((summary) => ({
       split: summary.split,

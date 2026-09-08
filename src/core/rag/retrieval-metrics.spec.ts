@@ -1,4 +1,5 @@
 import {
+  assessCorpusCoverage,
   scoreCase,
   summarizeRun,
   summarizeSplit,
@@ -148,5 +149,66 @@ describe('summarizeRun', () => {
     expect(holdout.hitRate).toBe(0);
     expect(all.hitRate).toBeCloseTo(0.5, 10);
     expect(all.negatives).toBe(1);
+  });
+});
+
+describe('assessCorpusCoverage', () => {
+  const covered: RetrievalCorpusCase = {
+    id: 'covered',
+    split: 'calibration',
+    query: 'Where is the retriever?',
+    expectedPaths: ['src/core/rag/retriever.ts'],
+  };
+  const uncovered: RetrievalCorpusCase = {
+    id: 'uncovered',
+    split: 'calibration',
+    query: 'Where is cosine similarity computed?',
+    expectedPaths: ['src/core/rag/math.ts'],
+  };
+
+  it('caps the achievable hit rate by what the index actually holds', () => {
+    const coverage = assessCorpusCoverage(
+      [covered, uncovered, negative],
+      ['src/core/rag/retriever.ts'],
+    );
+
+    expect(coverage.expectedPaths).toBe(2);
+    expect(coverage.coveredPaths).toBe(1);
+    expect(coverage.missingPaths).toEqual(['src/core/rag/math.ts']);
+    expect(coverage.unreachableCases).toEqual(['uncovered']);
+    // One of two positives can be hit at all, so no retriever can exceed 0.5.
+    expect(coverage.reachableHitCeiling).toBeCloseTo(0.5, 10);
+  });
+
+  // The live index held both `src\core\rag\retriever.ts` and its forward-slash
+  // twin. A comparison that respects the separator reports a covered file as
+  // missing on exactly one of the two.
+  it('matches regardless of the separator the index stored', () => {
+    const coverage = assessCorpusCoverage([covered], ['src\\core\\rag\\retriever.ts']);
+
+    expect(coverage.missingPaths).toEqual([]);
+    expect(coverage.reachableHitCeiling).toBe(1);
+  });
+
+  it('ignores negatives, which have nothing to cover', () => {
+    const coverage = assessCorpusCoverage([negative], []);
+
+    expect(coverage.expectedPaths).toBe(0);
+    expect(coverage.unreachableCases).toEqual([]);
+    expect(coverage.reachableHitCeiling).toBe(1);
+  });
+
+  it('counts a case reachable when any one of its expected paths is indexed', () => {
+    const either: RetrievalCorpusCase = {
+      id: 'either',
+      split: 'calibration',
+      query: 'Where is ranking fused?',
+      expectedPaths: ['src/core/rag/hybrid-ranking.ts', 'src/core/rag/retriever.ts'],
+    };
+    const coverage = assessCorpusCoverage([either], ['src/core/rag/retriever.ts']);
+
+    expect(coverage.missingPaths).toEqual(['src/core/rag/hybrid-ranking.ts']);
+    expect(coverage.unreachableCases).toEqual([]);
+    expect(coverage.reachableHitCeiling).toBe(1);
   });
 });
