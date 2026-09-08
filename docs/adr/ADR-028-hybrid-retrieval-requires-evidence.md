@@ -166,3 +166,80 @@ exist. That is a live defect, and it is now measured rather than suspected.
 See `docs/benchmarks/results/2026-09-08-ollama-calibration.json` for the run,
 and [ADR-031](./ADR-031-measure-before-building.md) for why it could not have
 been measured before.
+
+---
+
+## Amendment — 2026-09-08 · A term the repository has never written is the evidence that was missing
+
+The defect measured earlier the same day is closed. The grounding predicate now
+has a precondition: **if a subject term of the question appears nowhere in the
+indexed source, Umbra abstains and names the term.**
+
+`findUnknownTerms` in `src/core/rag/unknown-terms.ts` asks FTS5 about each
+subject term of the query. `RetrieverService#getContextForLLM` consults it
+before embedding anything, so an abstention decided this way costs no provider
+call at all — the same ordering argument ADR-025 §4 made for the index-presence
+probe, and it shows up as halved tail latency.
+
+### Why this satisfies this record's own criterion
+
+ADR-028 required "independent evidence, not a raw threshold fitted to one
+repository". A term's presence in the index is a property the index answers
+about itself: no constant to tune, nothing to re-fit elsewhere. The claim is one
+a person accepts without arithmetic — *a codebase that has never written the
+name of a message broker does not integrate with that broker.*
+
+### Three subtleties that were not obvious
+
+**Morphology, not subject, was the first false-abstention source.** *"Where is
+retrieval handled?"* against source that says `handle` must not abstain.
+`termProbes` therefore probes the exact term and, when it carries an
+inflectional ending, its stem as an FTS5 **prefix**. The prefix matters because
+stemming only the query still fails when the code holds a different inflection:
+`defined` reduced to `defin` matches nothing, while `defin*` matches `defines`.
+
+**Taught vocabulary is known by definition.** `RetrievalMemoryService#expand`
+*appends* its translations and keeps the operator's original wording, so a word
+taught through `/learn-search` survives into the expanded query and looks
+exactly like a word the repository has never contained — which is precisely
+what it is, and precisely why ADR-029 exists. Without the `knownTerms()`
+exemption this rule would have silently disabled the alias feature for the only
+vocabulary it serves. This was caught by a pre-existing test, not by design.
+
+**A corpus negative is destroyed by writing about it.** The first version of
+`unknown-terms.ts` named a real corpus term in its own documentation. The
+repository then contained that word, the rule correctly reported it as known,
+and that case was the single negative still failing the next run. The module now
+describes the *shape* of such a question and never writes the word. This is a
+standing hazard for anyone documenting this area.
+
+### Measured, on the same corpus and a clean index
+
+| | Before | After |
+|---|---|---|
+| Hit@4 (45 positives) | 88.9% | 86.7% |
+| MRR | 0.706 | 0.687 |
+| False abstention | 0% | **2.2%** (1 of 45) |
+| **Correct abstention** (10 negatives) | **0%** | **100%** |
+| p95 latency | 827 ms | **455 ms** |
+
+The one false abstention is `lexical-index`: *"Where is the FTS5 lexical code
+index created and synchronized?"* The repository says *sync*, never
+*synchronized*, and no inflection of this rule bridges that. It is the whole of
+the Hit@4 change — 39 of 45 instead of 40 — and the operator sees the
+unrecognised term named rather than four confident wrong files.
+
+The comparison is honest but not perfectly controlled: source files were added
+between the two runs, so the index differs. That easily covers a one-case Hit@4
+move. It does not cover 0% to 100%.
+
+### What this does not fix
+
+`negative-redis` in the holdout remains uncatchable by this rule, and not
+through any defect of the corpus: the word `redis` genuinely appears in this
+repository's source, so *"Where is Redis used as the semantic vector store?"*
+has no absent term. Distinguishing "mentioned" from "used as" needs more than
+term presence. It is a fair hard case and is left standing rather than edited
+away.
+
+Report: `docs/benchmarks/results/2026-09-08-ollama-calibration.json`.

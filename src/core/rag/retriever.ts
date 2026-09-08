@@ -1,5 +1,6 @@
 import { AgentDB } from '../state/db';
 import { cosineSimilarity } from './math';
+import { findUnknownTerms, unknownTermReport } from './unknown-terms';
 import { ProcessedChunk } from '../types';
 import { writeLine } from '../observability/console-sink';
 import {
@@ -507,6 +508,50 @@ export class RetrieverService {
    */
   public async getContextForLLM(query: string, context?: string): Promise<string> {
     this.lastLearningCandidate = undefined;
+
+    // Before embedding anything: does the question name something this
+    // repository has never written? Rank agreement cannot answer that — it
+    // tests whether two retrievers agree, not whether either is about the
+    // question, and on 2026-09-08 it returned source for all ten
+    // nonexistent-feature cases on both providers (ADR-028 amendment).
+    //
+    // Placed ahead of `query` deliberately: an abstention decided here costs
+    // no embedding call at all, which is the same ordering argument ADR-025 §4
+    // made for the index-presence probe.
+    // Before embedding anything: does the question name something this
+    // repository has never written? Rank agreement cannot answer that — it
+    // tests whether two retrievers agree, not whether either is about the
+    // question, and on 2026-09-08 it returned source for all ten
+    // nonexistent-feature cases on both providers (ADR-028 amendment).
+    //
+    // Placed ahead of `query` deliberately: an abstention decided here costs no
+    // embedding call at all, the same ordering argument ADR-025 §4 made for the
+    // index-presence probe.
+    //
+    // Terms the operator taught through `/learn-search` are exempt. `expand`
+    // appends its translations and keeps the original wording, so a taught word
+    // survives into the expanded query and would otherwise be refused as
+    // unknown — which would silently disable the ADR-029 alias feature for
+    // exactly the vocabulary it exists to serve.
+    const taught = this.retrievalMemory.knownTerms();
+    const unknown = findUnknownTerms(this.db, this.retrievalMemory.expand(query), taught);
+    if (unknown.length > 0) {
+      const clarification = context?.trim();
+      // Unlike the ungrounded path below, a clarification is checked rather
+      // than retried: it cannot make an absent word present, but the operator's
+      // own wording may carry an alias trigger that resolves it.
+      const stillUnknown =
+        clarification === undefined || clarification.length === 0
+          ? unknown
+          : findUnknownTerms(
+              this.db,
+              this.retrievalMemory.expand(`${query}\n${clarification}`),
+              taught,
+            );
+
+      if (stillUnknown.length > 0) return unknownTermReport(query, stillUnknown);
+    }
+
     let results = await this.query(query, 4);
     const clarified = context?.trim();
     let recoveredWithContext = false;

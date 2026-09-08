@@ -62,7 +62,13 @@ describe('contextual retrieval retry', () => {
 
     const report = await retriever.getContextForLLM('where is Saturn payroll');
 
-    expect(query).toHaveBeenCalledTimes(1);
+    // Was `toHaveBeenCalledTimes(1)`. The unknown-term gate now reaches the same
+    // abstention before embedding anything, because this repository contains no
+    // occurrence of `saturn` or `payroll` — so the retrieval never runs at all.
+    // The outcome the test was written to protect is unchanged; what changed is
+    // that it no longer costs an embedding call.
+    expect(query).not.toHaveBeenCalled();
     expect(report).toContain('NO GROUNDED EVIDENCE');
+    expect(report).toContain('`saturn`');
   });
 });
