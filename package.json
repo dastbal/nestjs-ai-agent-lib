@@ -42,7 +42,8 @@
     "test:contracts": "jest --runInBand --testPathPatterns=contract",
     "test:e2e": "jest --runInBand --testPathPatterns=e2e",
     "test:cov": "jest --coverage",
-    "lint": "node node_modules/typescript/bin/tsc --noEmit"
+    "lint": "node node_modules/typescript/bin/tsc --noEmit",
+    "bench:retrieval": "node scripts/bench-retrieval.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

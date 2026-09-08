@@ -1311,3 +1311,55 @@ as the old resolution was in place.
    ESM output from a scratch project — not by reading the emitted files.
 3. Keep the CommonJS path byte-identical to today's, so Nest consumers cannot be
    affected by a change made for someone else.
+
+---
+
+## A fixture index, so retrieval quality can be a CI gate
+
+> Deferred 2026-09-08 while implementing ADR-031 phase 1. The runner, the
+> corpus and the scoring all landed; only the offline path did not.
+
+### The idea
+
+Commit a small fixture index — a SQLite file with `code_chunks`, `chunk_vectors`
+and the FTS5 table already populated for a handful of source files — so
+`bench-retrieval` can score ranking, rank fusion and the abstention policy in
+GitHub Actions with no provider, no network and no credentials.
+
+### What is actually missing
+
+`scripts/bench-retrieval.mjs` launches the compiled MCP binary, which resolves a
+live embedding provider on startup. In CI that means either an Ollama daemon or
+Vertex credentials, and neither exists there. `.github/workflows/test.yml`
+therefore runs type-check, jest and build, and nothing that would notice a
+retrieval regression.
+
+This is the gap that makes every quality number in this repository a local,
+manual observation. The corpus and the metrics are now under version control;
+what is not is the ability to fail a pull request over them.
+
+### The mechanism to reuse
+
+`chunk_vectors` already keys on `(chunk_id, provider, model)`, so a fixture is a
+legitimate identity rather than a special case — `provider: 'fixture'` with its
+own model name cannot be confused with a real one, by construction (ADR-026).
+`vector-codec.ts` writes the BLOBs. `retrieval-metrics.ts` is already pure and
+takes the returned paths, so it needs no change at all.
+
+The query vector is the remaining piece: scoring a query requires embedding it.
+Either the fixture stores pre-computed query vectors keyed by corpus id — which
+makes the run fully offline but freezes the query set — or the CI job embeds
+with a tiny deterministic stub, which tests fusion and abstention but not the
+model. The first is the honest one: it measures ranking, and says so.
+
+### Plan
+
+1. Build the fixture from this repository with `provider: 'fixture'`, over a
+   subset of files large enough that the corpus positives have somewhere to
+   land and small enough to commit.
+2. Store one pre-computed query vector per corpus case beside it.
+3. Add a `--fixture` path to the runner that skips provider resolution and the
+   readiness gate.
+4. Add the job to `test.yml` as a **reporting** step first, and only make it
+   blocking once a few runs establish what the normal variance is. A gate that
+   fails on noise gets disabled within a week.

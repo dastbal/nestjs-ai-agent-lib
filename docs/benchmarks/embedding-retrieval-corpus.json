@@ -1,7 +1,7 @@
 {
-  "version": 3,
+  "version": 4,
   "purpose": "Independent retrieval-quality corpus for Umbra's hybrid RAG. Expected paths are established from source before any provider query.",
-  "splits": { "calibration": 45, "holdout": 15 },
+  "splits": { "calibration": 55, "holdout": 15 },
   "queries": [
     { "id": "provider-resolution", "split": "calibration", "query": "Where does Umbra resolve the active embedding provider?", "expectedPaths": ["src/core/rag/embeddings/embeddings-resolver.ts"] },
     { "id": "embedding-default", "split": "calibration", "query": "Where is Ollama selected as the default embedding provider?", "expectedPaths": ["src/core/rag/embeddings/embeddings-resolver.ts"] },
@@ -63,6 +63,16 @@
     { "id": "negative-s3", "split": "holdout", "query": "Where does Umbra upload RAG chunks to Amazon S3?", "expectedPaths": [] },
     { "id": "negative-redis", "split": "holdout", "query": "Where is Redis used as the semantic vector store?", "expectedPaths": [] },
     { "id": "negative-webhook", "split": "holdout", "query": "Where is the Stripe webhook signing secret configured?", "expectedPaths": [] },
-    { "id": "negative-salesforce", "split": "holdout", "query": "Where is the Salesforce OAuth callback implemented?", "expectedPaths": [] }
+    { "id": "negative-salesforce", "split": "holdout", "query": "Where is the Salesforce OAuth callback implemented?", "expectedPaths": [] },
+    { "id": "negative-prometheus", "split": "calibration", "query": "Where does Umbra expose a Prometheus metrics endpoint?", "expectedPaths": [] },
+    { "id": "negative-graphql", "split": "calibration", "query": "Where is the GraphQL schema for the agent API defined?", "expectedPaths": [] },
+    { "id": "negative-marketplace", "split": "calibration", "query": "Where does the plugin marketplace download third-party tools from?", "expectedPaths": [] },
+    { "id": "negative-multitenant", "split": "calibration", "query": "Where is per-tenant workspace isolation enforced?", "expectedPaths": [] },
+    { "id": "negative-rebase", "split": "calibration", "query": "Where does Umbra rewrite git history during an interactive rebase?", "expectedPaths": [] },
+    { "id": "negative-transcription", "split": "calibration", "query": "Where is the voice transcription pipeline for audio input?", "expectedPaths": [] },
+    { "id": "negative-mongodb", "split": "calibration", "query": "Where is the MongoDB document store for chunks configured?", "expectedPaths": [] },
+    { "id": "negative-kafka", "split": "calibration", "query": "Where are indexing events published to a Kafka topic?", "expectedPaths": [] },
+    { "id": "negative-grafana", "split": "calibration", "query": "Where is the Grafana dashboard definition for turn latency?", "expectedPaths": [] },
+    { "id": "negative-terraform", "split": "calibration", "query": "Where are the Terraform modules that provision Umbra infrastructure?", "expectedPaths": [] }
   ]
 }
