@@ -8,6 +8,7 @@ import { resolveWorkspacePath } from '../security';
 import { authorizeFileAction, evaluateFileAction, formatAuthorizationFailure } from './utils/authorize';
 import { requestApproval, rethrowIfSuspension } from './utils/approval';
 import { wrapUntrustedFileContent, stripUntrustedFrame } from './utils/untrusted-content';
+import { boundFileContent } from './utils/bounded-read';
 import { agentPath } from '../config/agent-directory';
 
 let indexTimer: NodeJS.Timeout | null = null;
@@ -101,8 +102,18 @@ export const safeReadFileTool = tool(
       if (!targetPath) return '❌ DENIED: The target cannot be resolved safely.';
       if (!fs.existsSync(targetPath)) return `❌ File not found: ${filePath}`;
       const content = fs.readFileSync(targetPath, "utf-8");
-      log.sys(`File read successfully: ${filePath}`);
-      return wrapUntrustedFileContent(filePath, content);
+      // Bound the payload before it becomes context. A whole-file read is how
+      // a turn's token cost explodes, and it was previously invisible until the
+      // provider had already charged for it (ADR-031 phase 2).
+      const bounded = boundFileContent(filePath, content);
+      if (bounded.truncated) {
+        log.sys(
+          `File read truncated: ${filePath} (${bounded.keptLines}/${bounded.totalLines} lines, ${bounded.totalTokens} tokens)`,
+        );
+      } else {
+        log.sys(`File read successfully: ${filePath}`);
+      }
+      return wrapUntrustedFileContent(filePath, bounded.content);
     } catch (e: any) {
       log.error(`Failed to read file ${filePath}: ${e.message}`);
       return `❌ Error reading file: ${e.message}`;

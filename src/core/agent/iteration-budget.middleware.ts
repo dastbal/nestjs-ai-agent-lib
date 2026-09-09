@@ -1,5 +1,9 @@
-import { ToolMessage } from '@langchain/core/messages';
+import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { createMiddleware } from 'langchain';
+import { checkContextFit, describeContextOverflow } from './context-fit';
+import { decideOversizeRoute, describeOversizeRoute } from './oversize-routing';
+import type { ModelSource } from '../config/model-resolver';
+import type { CountableTool } from '../llm/tokens/token-counter.port';
 import {
   countMessagesWithToolCallsArray,
   describeMessageType,
@@ -32,6 +36,30 @@ export interface TurnGovernorOptions {
   onSpend?: (spend: Readonly<TurnSpend>, stopped: TurnDimension | null) => void;
   /** Clock injection point; production uses `Date.now`. */
   now?: () => number;
+  /**
+   * The model this agent will call, enabling the pre-send context check.
+   *
+   * Omitted, the check does not run at all — which is the correct default for
+   * a caller that does not know which model it is bound to, and keeps every
+   * existing construction unchanged.
+   */
+  model?: string;
+  /**
+   * Who chose {@link model}, which decides whether it may be routed away from.
+   *
+   * Defaults to `explicit` — the conservative reading. A caller that does not
+   * say gets the behaviour that never overrides anything.
+   */
+  modelSource?: ModelSource;
+  /**
+   * Builds a chat model by bare id, for the routing path.
+   *
+   * Injected rather than imported so this middleware keeps no dependency on
+   * provider construction, and so a test can route without a provider.
+   */
+  buildModel?: (model: string) => unknown;
+  /** Notified when a turn was routed to a different model, for the operator. */
+  onRouted?: (notice: string) => void;
 }
 
 /**
@@ -117,6 +145,60 @@ export function createIterationBudgetMiddleware(
     },
     wrapModelCall: async (request, handler) => {
       const messages = request.state.messages;
+
+      // Before anything else: will this even fit? The provider would answer the
+      // same question by charging for the round trip and returning an error
+      // about token limits that names no cause — which ADR-007's self-healing
+      // then treats as a tool cycle to reset, so the operator sees a session
+      // restart and no reason. One local count answers it for free.
+      //
+      // Silent unless it refuses, and it only refuses when the window is known:
+      // `contextWindowFor` returns undefined for every model not in the shipped
+      // table, and the check abstains rather than guessing (ADR-031 phase 2).
+      if (options.model !== undefined) {
+        const fit = checkContextFit({
+          model: options.model,
+          system: typeof request.systemPrompt === 'string' ? request.systemPrompt : undefined,
+          tools: (request.tools ?? []) as CountableTool[],
+          messages,
+        });
+
+        if (!fit.fits) {
+          // Too large for this model. Whether that is fatal depends on who
+          // chose the model: an explicit `--model` or a deliberate
+          // `AGENT_MODEL` is never overridden, and only a project default that
+          // nobody picked for this run may be routed away from (ADR-002
+          // amendment).
+          const decision = decideOversizeRoute({
+            model: options.model,
+            source: options.modelSource ?? 'explicit',
+            tokens: fit.tokens,
+          });
+
+          if (!decision.route) {
+            // Returned in place of the model's answer, exactly as the handler
+            // would have: `wrapModelCall` yields the response, so the turn ends
+            // with an explanation instead of a provider error. Nothing is
+            // recorded as usage, because nothing was spent.
+            return new AIMessage(
+              `${describeContextOverflow(options.model, fit)}\n\nNot routed elsewhere: ${decision.reason}.`,
+            ) as any;
+          }
+
+          const routed = options.buildModel?.(decision.to);
+          if (routed === undefined) {
+            return new AIMessage(
+              `${describeContextOverflow(options.model, fit)}\n\n` +
+                `${decision.to} would fit, but this session cannot construct it.`,
+            ) as any;
+          }
+
+          // Announced, never silent. A swap changes the price and the answer,
+          // and an operator who cannot see it happen cannot reason about either.
+          options.onRouted?.(describeOversizeRoute(options.model, decision, fit.tokens));
+          return handler({ ...request, model: routed } as typeof request);
+        }
+      }
       // The counter assumes deepagents hands it messages carrying a `tool_calls`
       // array. That assumption has never been verified against a live run, and
       // telemetry shows turns exceeding this budget by more than one batch can

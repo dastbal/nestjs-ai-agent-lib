@@ -3,6 +3,7 @@ import {
   integrityCheckTool,
   listAdrsTool,
   queryDependencyGraphTool,
+  queryNestGraphTool,
 } from '../../core/tools';
 import { z } from 'zod';
 import { McpToolDescriptor, McpToolResult } from './mcp.contracts';
@@ -57,6 +58,14 @@ export interface PublishedTool {
   readonly inputSchema: z.ZodRawShape;
   /** Runs the tool and maps its output across the DTO boundary. */
   readonly invoke: (args: Record<string, unknown>) => Promise<McpToolResult>;
+}
+
+/** Current availability of semantic retrieval without invoking a provider. */
+export interface SemanticSearchReadiness {
+  /** Whether an `ask_codebase` call can retrieve from durable vector coverage. */
+  readonly ready: boolean;
+  /** Operator-facing state that tells a client whether a retry is useful. */
+  readonly message: string;
 }
 
 /**
@@ -148,6 +157,53 @@ function publishDependencyGraph(): PublishedTool {
 }
 
 /**
+ * Builds the `query_nest_graph` publication.
+ *
+ * Published beside `query_dependency_graph` rather than folded into it. That
+ * tool's schema is a file path and a direction, because a file import relates
+ * two files. Nest wiring relates a module to a token, and the token is often a
+ * string constant belonging to no file — so one schema carrying both would need
+ * a `filePath` that is sometimes not a path.
+ *
+ * @returns The published tool.
+ */
+function publishNestGraph(): PublishedTool {
+  return {
+    name: 'query_nest_graph',
+    description:
+      'Answers NestJS dependency-injection questions a file-import graph cannot: which module ' +
+      'provides an injection token, which classes inject it, and what one module binds. Works ' +
+      'for string tokens, and for modules whose wiring lives in forRoot() rather than in the ' +
+      '@Module decorator.',
+    inputSchema: {
+      name: z
+        .string()
+        .min(1)
+        .describe('An injection token (AI_AGENT) or a module class name (UsersModule).'),
+      direction: z
+        .enum(['provides', 'injects', 'module'])
+        .describe(
+          'provides = modules that bind this token; injects = classes that ask for it; ' +
+            'module = everything the named module binds.',
+        ),
+    },
+    invoke: async (args) => {
+      const name = typeof args.name === 'string' ? args.name.trim() : '';
+      const direction = args.direction;
+
+      if (name.length === 0) {
+        return toErrorResult('name is required and must be a non-empty string.');
+      }
+      if (direction !== 'provides' && direction !== 'injects' && direction !== 'module') {
+        return toErrorResult('direction is required and must be "provides", "injects" or "module".');
+      }
+
+      return toToolResult(await runTool(queryNestGraphTool, { name, direction }));
+    },
+  };
+}
+
+/**
  * Builds the `run_integrity_check` publication.
  *
  * The empty schema is load-bearing, not an oversight: the tool derives its root
@@ -172,12 +228,16 @@ function publishIntegrityCheck(): PublishedTool {
 /**
  * Builds the `ask_codebase` publication.
  *
- * Published only when embeddings are available; see `buildToolCatalog`.
+ * Always published in the stable catalog. Until durable coverage is ready, its
+ * handler returns a typed retryable status rather than querying partial data.
  *
  * @param decorate - Adds index provenance to a successful answer.
  * @returns The published tool.
  */
-function publishAskCodebase(decorate: (text: string) => string): PublishedTool {
+function publishAskCodebase(
+  decorate: (text: string) => string,
+  readReadiness: () => SemanticSearchReadiness,
+): PublishedTool {
   return {
     name: 'ask_codebase',
     description:
@@ -202,6 +262,14 @@ function publishAskCodebase(decorate: (text: string) => string): PublishedTool {
         return toErrorResult('query is required and must be a non-empty string.');
       }
 
+      const readiness = readReadiness();
+      if (!readiness.ready) {
+        return toErrorResult(
+          `Semantic search is not ready: ${readiness.message}. ` +
+            'Read get_index_status and retry when durable vector coverage is available.',
+        );
+      }
+
       const raw = await runTool(askCodebaseTool, { query, context });
       const mapped = toToolResult(raw);
 
@@ -214,30 +282,64 @@ function publishAskCodebase(decorate: (text: string) => string): PublishedTool {
   };
 }
 
+/** Publishes durable index coverage and live background-index state. */
+function publishIndexStatus(readIndexStatus: () => string): PublishedTool {
+  return {
+    name: 'get_index_status',
+    description:
+      'Reports the current project-index lifecycle and durable vector coverage without calling an ' +
+      'embedding provider. Use it before retrying semantic search while indexing is in progress.',
+    inputSchema: {},
+    invoke: async () => ({ content: [{ type: 'text', text: readIndexStatus() }] }),
+  };
+}
+
 /**
  * Assembles the published catalog.
  *
- * ## Why `ask_codebase` is conditional
+ * ## Why `ask_codebase` stays visible while indexing
  *
- * Three of the four tools are free and need no credentials. `ask_codebase`
- * embeds the query, which under Vertex costs money and requires ADC, and under
- * Ollama requires a running daemon with the model pulled. Advertising it when
- * neither holds would tell a foreign model about a tool that fails on first
- * use — the exact defect ADR-013 recorded, and worse here because the list is
- * fixed at launch and cannot be corrected mid-session.
+ * The catalog is fixed before the MCP handshake. `ask_codebase` therefore
+ * exposes a typed, retryable availability result while its background index is
+ * starting, rather than withholding the capability until a client has already
+ * cached its tool list. It invokes retrieval only after the supplied readiness
+ * boundary confirms durable coverage.
  *
  * @param options - Whether semantic search can answer, and how to stamp it.
  * @returns The tools to publish, in advertisement order.
  */
 export function buildToolCatalog(options: {
-  semanticSearchAvailable: boolean;
+  semanticSearchReadiness: () => SemanticSearchReadiness;
+  readIndexStatus: () => string;
   decorateSemanticAnswer?: (text: string) => string;
+  /** Whether a validated repository root is available for root-bound tools. */
+  projectRootReady?: () => boolean;
+  /** Recovery hint when the client has not supplied a valid root yet. */
+  projectRootMessage?: () => string;
 }): PublishedTool[] {
-  const catalog = [publishListAdrs(), publishDependencyGraph(), publishIntegrityCheck()];
+  const catalog = [
+    publishAskCodebase(options.decorateSemanticAnswer ?? ((text) => text), options.semanticSearchReadiness),
+    publishIndexStatus(options.readIndexStatus),
+    publishListAdrs(),
+    publishDependencyGraph(),
+    publishNestGraph(),
+    publishIntegrityCheck(),
+  ];
+  if (options.projectRootReady === undefined) return catalog;
 
-  if (options.semanticSearchAvailable) {
-    catalog.unshift(publishAskCodebase(options.decorateSemanticAnswer ?? ((text) => text)));
-  }
-
-  return catalog;
+  return catalog.map((tool) => {
+    if (tool.name === 'get_index_status') return tool;
+    return {
+      ...tool,
+      invoke: async (args) => {
+        if (!options.projectRootReady?.()) {
+          return toErrorResult(
+            options.projectRootMessage?.() ??
+              'Umbra has not received one validated project root. Open one project and reconnect.',
+          );
+        }
+        return tool.invoke(args);
+      },
+    };
+  });
 }

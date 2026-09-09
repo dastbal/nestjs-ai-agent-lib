@@ -1,11 +1,19 @@
 import { FileRegistry } from '../state/file-registry';
 import { NestChunker } from '../tools/ast/chunker';
+import { analyzeNestGraph } from '../tools/ast/nest-graph';
+import { backfillNestGraph, replaceNestGraphForFile } from './nest-graph-store';
 import { AgentDB } from '../state/db';
 import { runtimeRoot } from '../config/runtime-root';
-import { finishTransientLine, writeFragment, writeLine, writeTransientLine } from '../observability/console-sink';
+import {
+  finishTransientLine,
+  isInteractiveTerminal,
+  writeLine,
+  writeTransientLine,
+} from '../observability/console-sink';
 import { EmbeddingsPort } from './embeddings';
 import { resolveEmbeddings } from './embeddings/embeddings-resolver';
 import { readIndexStamp, writeIndexStamp } from './index-stamp';
+import { IndexRunLease } from './index-run-lease';
 import { encodeVector } from './vector-codec';
 import {
   assertStoredInputsAreSafe,
@@ -16,7 +24,21 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { GraphEdge, ProcessedChunk } from '../types';
-import { WorkspaceDiscoveryService, WorkspaceFile } from '../config/workspace-discovery';
+import {
+  WorkspaceDiscovery,
+  WorkspaceDiscoveryService,
+  WorkspaceFile,
+} from '../config/workspace-discovery';
+
+/** Durable result of one requested index operation. */
+export interface IndexRunResult {
+  /** Whether this process indexed or deferred to an existing SQLite lease. */
+  readonly disposition: 'completed' | 'already-running';
+  /** Files successfully committed during this invocation. */
+  readonly filesIndexed: number;
+  /** Final stamp state when this process performed work. */
+  readonly status?: 'complete' | 'partial' | 'empty';
+}
 
 /**
  * The Indexer Service (The Orchestrator) 🎼
@@ -27,7 +49,7 @@ export class IndexerService {
   private registry: FileRegistry;
   private chunker: NestChunker;
   private db: any; // Type 'any' allowed here for better-sqlite3 instance wrapper
-  private static activeIndex: Promise<void> | undefined;
+  private static activeIndex: Promise<IndexRunResult> | undefined;
 
   /**
    * When true, all progress console.log calls are suppressed.
@@ -59,40 +81,70 @@ export class IndexerService {
     IndexerService.hasTransientProgress = false;
   }
 
+  /** Keeps repeated TTY failures in the transient row, while logs retain detail. */
+  private static failure(message: string): void {
+    if (IndexerService.silent) return;
+    if (isInteractiveTerminal()) {
+      writeTransientLine(message);
+      IndexerService.hasTransientProgress = true;
+      return;
+    }
+    IndexerService.finishProgress();
+    writeLine(message);
+  }
+
   // Optimization: Send chunks to Vertex AI in groups to respect rate limits and improve speed.
   private BATCH_SIZE = 10;
 
   /** The embedding provider whose `chunk_vectors` rows this run writes. */
   private readonly embeddings: EmbeddingsPort;
 
+  /** Timestamp used only for a stable elapsed-time and ETA progress display. */
+  private indexingStartedAt = 0;
+
+  /** Optional observer used by a host such as MCP to expose live progress. */
+  private readonly progressObserver?: (progress: string) => void;
+
   /**
    * @param embeddings - Embedding port to index with. Defaults to the resolved
    *        provider, so every existing `new IndexerService()` call site keeps
    *        working unchanged.
+   * @param progressObserver - Optional non-persistent progress sink. It never
+   *        changes the durable indexing result.
    */
-  constructor(embeddings: EmbeddingsPort = resolveEmbeddings().port) {
+  constructor(
+    embeddings: EmbeddingsPort = resolveEmbeddings().port,
+    progressObserver?: (progress: string) => void,
+  ) {
     this.registry = new FileRegistry();
     this.chunker = new NestChunker(runtimeRoot());
     this.db = AgentDB.getInstance();
     this.embeddings = embeddings;
+    this.progressObserver = progressObserver;
   }
 
   /**
    * Main Entry Point: Scans the project and updates the brain.
    * Scans files, checks hashes, generates embeddings, and saves the knowledge graph.
    */
-  public indexProject(): Promise<void> {
+  public indexProject(): Promise<IndexRunResult> {
     if (IndexerService.activeIndex !== undefined) return IndexerService.activeIndex;
     const active = this.indexProjectOnce();
     IndexerService.activeIndex = active;
-    void active.finally(() => {
-      if (IndexerService.activeIndex === active) IndexerService.activeIndex = undefined;
-    });
+    void active.then(
+      () => {
+        if (IndexerService.activeIndex === active) IndexerService.activeIndex = undefined;
+      },
+      () => {
+        if (IndexerService.activeIndex === active) IndexerService.activeIndex = undefined;
+      },
+    );
     return active;
   }
 
   /** Performs one shared index run after callers have joined the active promise. */
-  private async indexProjectOnce(): Promise<void> {
+  private async indexProjectOnce(): Promise<IndexRunResult> {
+    this.indexingStartedAt = Date.now();
     const rootDir = runtimeRoot();
     let discovery;
     try {
@@ -103,7 +155,32 @@ export class IndexerService {
       throw error;
     }
 
-      IndexerService.log(`🚀 Starting Indexing Process on: ${discovery.sourceOrigin} (${discovery.sourceFiles.length} files)`);
+    const identity = this.embeddings.identity;
+    const lease = IndexRunLease.acquire(this.db, {
+      provider: identity.provider,
+      model: identity.model,
+    });
+    if (lease === undefined) {
+      IndexerService.log('⏳ Another Umbra process is already indexing this root; this process will not duplicate it.');
+      return { disposition: 'already-running', filesIndexed: 0 };
+    }
+
+    const heartbeat = setInterval(() => lease.heartbeat(), 15_000);
+    heartbeat.unref();
+    try {
+      return await this.indexDiscoveredProject(rootDir, discovery);
+    } finally {
+      clearInterval(heartbeat);
+      lease.release();
+    }
+  }
+
+  /** Indexes a discovered source set while this process owns the SQLite lease. */
+  private async indexDiscoveredProject(
+    rootDir: string,
+    discovery: WorkspaceDiscovery,
+  ): Promise<IndexRunResult> {
+    IndexerService.log(`🚀 Starting Indexing Process on: ${discovery.sourceOrigin} (${discovery.sourceFiles.length} files)`);
 
     const filesToProcess: WorkspaceFile[] = [];
 
@@ -142,7 +219,33 @@ export class IndexerService {
     // the whole switch path: after `--embeddings ollama`, every row still
     // holds its content and its Vertex vector, and only the new column is
     // empty.
-    const backfilled = await this.backfillMissingVectors();
+    let backfilled: number;
+    try {
+      backfilled = await this.backfillMissingVectors();
+
+      // Nest wiring is derived from source, not from embeddings, so it is
+      // rebuilt for any file whose scan is missing or stale — including every
+      // file of an index built before this table existed. Without it the graph
+      // stays empty on an up-to-date repository, because nothing re-processes
+      // a file whose content has not changed.
+      const nestFiles = backfillNestGraph(
+        this.db,
+        discovery.sourceFiles,
+        analyzeNestGraph,
+        (absolutePath) => fs.readFileSync(absolutePath, "utf-8"),
+      );
+      if (nestFiles > 0) IndexerService.log(`🧩 Read NestJS wiring from ${nestFiles} files.`);
+    } catch (error: unknown) {
+      const diagnostic = error instanceof Error ? error.message : String(error);
+      writeIndexStamp(rootDir, identity, {
+        filesIndexed: this.countIndexedFiles(),
+        discoveredFiles: discovery.sourceFiles.length,
+        coveredFiles: this.countCoveredFiles(),
+        status: 'partial',
+        diagnostic,
+      });
+      throw error;
+    }
 
     if (filesToProcess.length === 0) {
       IndexerService.log(
@@ -151,10 +254,12 @@ export class IndexerService {
           : '✨ Project is up to date.',
       );
       writeIndexStamp(rootDir, identity, {
-        filesIndexed: 0,
+        filesIndexed: this.countIndexedFiles(),
+        discoveredFiles: discovery.sourceFiles.length,
+        coveredFiles: this.countCoveredFiles(),
         status: 'complete',
       });
-      return;
+      return { disposition: 'completed', filesIndexed: 0, status: 'complete' };
     }
 
     IndexerService.log(`📦 Found ${filesToProcess.length} files to process.`);
@@ -164,13 +269,15 @@ export class IndexerService {
     for (let position = 0; position < filesToProcess.length; position += 1) {
       const file = filesToProcess[position]!;
       try {
-        await this.indexSingleFile(file, position + 1, filesToProcess.length);
-        indexedFiles += 1;
+        const outcome = await this.indexSingleFile(file, position + 1, filesToProcess.length);
+        if (outcome === 'indexed') indexedFiles += 1;
       } catch (error: unknown) {
-        IndexerService.finishProgress();
         const message = error instanceof Error ? error.message : String(error);
         failures.push(`${file.relativePath}: ${message}`);
-        writeLine(`❌ Indexing ${file.relativePath} was not committed: ${message}`);
+        IndexerService.failure(
+          `❌ ${position + 1}/${filesToProcess.length} pending | ` +
+            `${compactPath(file.relativePath, 22).padEnd(22)} | ${shortFailureReason(message)}`,
+        );
       }
     }
 
@@ -180,14 +287,21 @@ export class IndexerService {
     IndexerService.finishProgress();
     IndexerService.log(
       failures.length > 0
-        ? `⚠️  Indexing finished with ${failures.length} uncommitted file(s) — rerun after fixing embeddings.`
+        ? `⚠️  Indexing partial — ${failures.length} file(s) remain pending. Run \`umbra doctor --index\` after fixing the reported cause.`
         : '✅ Indexing Complete.',
     );
     writeIndexStamp(rootDir, identity, {
-      filesIndexed: indexedFiles,
+      filesIndexed: this.countIndexedFiles(),
+      discoveredFiles: discovery.sourceFiles.length,
+      coveredFiles: this.countCoveredFiles(),
       status: failures.length > 0 ? 'partial' : 'complete',
       diagnostic: failures.length > 0 ? failures.slice(0, 5).join('; ') : undefined,
     });
+    return {
+      disposition: 'completed',
+      filesIndexed: indexedFiles,
+      status: failures.length > 0 ? 'partial' : 'complete',
+    };
   }
 
   /**
@@ -198,24 +312,39 @@ export class IndexerService {
    * batches: the durable unit is a source file, so interruption can never make
    * a file registry hash claim vectors that were never saved.
    */
-  private async indexSingleFile(file: WorkspaceFile, position: number, total: number): Promise<void> {
-    const percentage = Math.floor((position / total) * 100);
-    IndexerService.progress(`${percentage}% | ${position}/${total} | ${compactPath(file.relativePath)} | analyzing`);
+  private async indexSingleFile(
+    file: WorkspaceFile,
+    position: number,
+    total: number,
+  ): Promise<'indexed' | 'skipped'> {
+    this.reportProgress(file.relativePath, position, total, 0, 'preparing');
     const content = fs.readFileSync(file.absolutePath, 'utf-8');
     const hash = crypto.createHash('md5').update(content).digest('hex');
     const analysis = this.chunker.analyze(file.relativePath, content, hash);
     const chunks = splitChunksForEmbedding(
       analysis.chunks.map((chunk) => ({ ...chunk, filePath: file.relativePath } as ProcessedChunk & { filePath: string })),
     ) as Array<ProcessedChunk & { filePath: string }>;
-    const vectors = chunks.length === 0 ? [] : await this.embedFileChunks(chunks, file.relativePath, position, total);
+    if (chunks.length === 0) {
+      if (content.trim().length > 0) {
+        throw new Error(
+          'The source contains content but produced zero index chunks. It was left pending for retry.',
+        );
+      }
+      this.commitSkippedFile(file, hash, analysis.skeleton, 'empty-or-whitespace source');
+      this.reportProgress(file.relativePath, position, total, 0, 'skipped empty source');
+      return 'skipped';
+    }
+
+    const vectors = await this.embedFileChunks(chunks, file.relativePath, position, total);
     if (vectors.length !== chunks.length || vectors.some((vector) => vector.length === 0)) {
       throw new Error(`Embedding provider returned ${vectors.length} unusable vectors for ${chunks.length} chunks.`);
     }
 
     const identity = this.embeddings.identity;
     const replaceFile = this.db.prepare(`
-      INSERT OR REPLACE INTO file_registry (path, hash, last_indexed, skeleton_signature)
-      VALUES (?, ?, ?, ?)
+      INSERT OR REPLACE INTO file_registry
+        (path, hash, last_indexed, skeleton_signature, index_state, skip_reason)
+      VALUES (?, ?, ?, ?, 'indexed', NULL)
     `);
     const insertChunk = this.db.prepare(`
       INSERT INTO code_chunks (id, file_path, chunk_type, content, metadata)
@@ -238,9 +367,39 @@ export class IndexerService {
         insertVector.run(chunk.id, identity.provider, identity.model, vector.length, encodeVector(vector));
       }
       for (const edge of analysis.dependencies) insertEdge.run(edge.sourcePath, edge.targetPath, edge.relation);
+
+      // Nest wiring is replaced inside the same transaction as the chunks it
+      // belongs to. Committed separately it could be half-applied, and a
+      // binding row that outlives the file that declared it is the stale
+      // confidence ADR-017 was written about.
+      replaceNestGraphForFile(this.db, file.relativePath, analyzeNestGraph(file.relativePath, content), hash);
     });
     commit();
-    IndexerService.progress(`${percentage}% | ${position}/${total} | ${compactPath(file.relativePath)} | saved ${chunks.length} chunks`);
+    this.reportProgress(file.relativePath, position, total, vectors.length, `saved ${chunks.length} chunks`);
+    return 'indexed';
+  }
+
+  /** Commits an intentional zero-content omission, never an embedding failure. */
+  private commitSkippedFile(
+    file: WorkspaceFile,
+    hash: string,
+    skeleton: object | null,
+    reason: string,
+  ): void {
+    const replaceFile = this.db.prepare(`
+      INSERT OR REPLACE INTO file_registry
+        (path, hash, last_indexed, skeleton_signature, index_state, skip_reason)
+      VALUES (?, ?, ?, ?, 'skipped', ?)
+    `);
+    this.db.transaction(() => {
+      replaceFile.run(
+        file.relativePath,
+        hash,
+        Date.now(),
+        skeleton === null ? null : JSON.stringify(skeleton),
+        reason,
+      );
+    })();
   }
 
   /** Embeds all chunks belonging to one file before that file becomes durable. */
@@ -254,15 +413,27 @@ export class IndexerService {
       let lastError: unknown;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          const label = `${Math.floor((filePosition / fileTotal) * 100)}% | ${filePosition}/${fileTotal} | ${compactPath(filePath)} | batch ${batchNumber}/${batches}`;
-          IndexerService.progress(`${label} | embedding ${batch.length} chunks`);
+          const label = `batch ${batchNumber}/${batches}`;
+          this.reportProgress(filePath, filePosition, fileTotal, vectors.length, `${label} · embedding ${batch.length}`);
           const startedAt = Date.now();
           const result = await this.awaitEmbeddingWithHeartbeat(
             this.embeddings.embedDocuments(batch.map(embeddingInputFor)),
-            label,
+            (elapsed) => this.reportProgress(
+              filePath,
+              filePosition,
+              fileTotal,
+              vectors.length,
+              `${label} · working ${elapsed}`,
+            ),
           );
           vectors.push(...result);
-          IndexerService.progress(`${label} | embedded ${formatElapsed(Date.now() - startedAt)}`);
+          this.reportProgress(
+            filePath,
+            filePosition,
+            fileTotal,
+            vectors.length,
+            `${label} · embedded in ${formatElapsed(Date.now() - startedAt)}`,
+          );
           lastError = undefined;
           break;
         } catch (error: unknown) {
@@ -277,10 +448,13 @@ export class IndexerService {
   }
 
   /** Emits a visible heartbeat while an embedding request is pending. */
-  private async awaitEmbeddingWithHeartbeat<T>(request: Promise<T>, label: string): Promise<T> {
+  private async awaitEmbeddingWithHeartbeat<T>(
+    request: Promise<T>,
+    reportHeartbeat: (elapsed: string) => void,
+  ): Promise<T> {
     const startedAt = Date.now();
     const heartbeat = setInterval(() => {
-      IndexerService.progress(`${label} | working ${formatElapsed(Date.now() - startedAt)}`);
+      reportHeartbeat(formatElapsed(Date.now() - startedAt));
     }, 15_000);
     heartbeat.unref();
     try {
@@ -288,6 +462,41 @@ export class IndexerService {
     } finally {
       clearInterval(heartbeat);
     }
+  }
+
+  /** Renders one width-stable interactive line for the file currently being indexed. */
+  private reportProgress(
+    filePath: string,
+    position: number,
+    total: number,
+    vectors: number,
+    state: string,
+  ): void {
+    const elapsed = Math.max(0, Date.now() - this.indexingStartedAt);
+    const remaining = position >= total || position === 0
+      ? 0
+      : Math.round((elapsed / position) * (total - position));
+    const percentage = Math.floor((position / total) * 100).toString().padStart(3);
+    const fileCounter = `${position}/${total}`.padStart(7);
+    const vectorCounter = `${vectors} vec`.padStart(7);
+    const progress =
+      `${percentage}% | ${fileCounter} | ${compactPath(filePath, 22).padEnd(22)} | ` +
+        `${vectorCounter} | ${formatElapsed(elapsed).padStart(5)} | ETA ${formatElapsed(remaining).padStart(5)} | ${state}`;
+    this.progressObserver?.(progress);
+    IndexerService.progress(progress);
+  }
+
+  /** Counts file rows that contain actual chunks and vectors rather than skips. */
+  private countIndexedFiles(): number {
+    return (this.db.prepare(`
+      SELECT COUNT(*) AS total FROM file_registry
+      WHERE index_state = 'indexed'
+    `).get() as { total: number }).total;
+  }
+
+  /** Counts every explicit durable source outcome, including intentional skips. */
+  private countCoveredFiles(): number {
+    return (this.db.prepare(`SELECT COUNT(*) AS total FROM file_registry`).get() as { total: number }).total;
   }
 
   // ==========================================
@@ -404,9 +613,14 @@ export class IndexerService {
             metadata: { startLine: 1, endLine: 1 },
           })),
         );
+        if (vectors.length !== batch.length || vectors.some((vector) => vector.length === 0)) {
+          throw new Error(
+            `Embedding provider returned ${vectors.length} unusable vectors for ${batch.length} stored chunks.`,
+          );
+        }
         insertMany(batch, vectors);
         embedded += batch.length;
-        writeFragment('.');
+        IndexerService.progress(`backfill | ${embedded}/${pending.length} vectors | ${identity.provider}/${identity.model}`);
       } catch (err: unknown) {
         // Counted, not printed per batch: a misconfiguration fails identically
         // every time, and one summary is more useful than N stack traces. Same
@@ -419,6 +633,9 @@ export class IndexerService {
       IndexerService.reportEmbeddingFailures(
         failures,
         Math.ceil(pending.length / this.BATCH_SIZE),
+      );
+      throw new Error(
+        `Could not backfill ${failures.length} embedding batch(es); existing files remain pending for retry.`,
       );
     }
 
@@ -558,7 +775,6 @@ export class IndexerService {
           // corrupts the JSON-RPC stream before the handshake completes.
           // ADR-024's evidence did not catch this, because its grep looked
           // for `console.log` only.
-          writeFragment('.'); // Visual feedback
           success = true;
           
           // Delay between batches to prevent triggering limits on large projects
@@ -642,6 +858,13 @@ export class IndexerService {
 
 }
 
+/** Makes a transient failure stable-width without repeating implementation detail. */
+function shortFailureReason(message: string): string {
+  if (message.includes('produced zero index chunks')) return 'chunking produced no output';
+  if (message.includes('Embedding provider returned')) return 'embedding response invalid';
+  return message.length > 32 ? `${message.slice(0, 31)}…` : message;
+}
+
 /** Formats elapsed indexing work without exposing implementation-specific timestamps. */
 function formatElapsed(milliseconds: number): string {
   const seconds = Math.floor(milliseconds / 1000);
@@ -649,6 +872,8 @@ function formatElapsed(milliseconds: number): string {
 }
 
 /** Keeps a transient line readable when a repository uses very deep paths. */
-function compactPath(filePath: string): string {
-  return filePath.length <= 34 ? filePath : `…${filePath.slice(-33)}`;
+function compactPath(filePath: string, maximumLength = 34): string {
+  return filePath.length <= maximumLength
+    ? filePath
+    : `…${filePath.slice(-(maximumLength - 1))}`;
 }

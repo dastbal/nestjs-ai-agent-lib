@@ -4,6 +4,7 @@ import {
   isGoogleCloudProjectId,
   resolveConfiguredModel,
   resolveModelForSession,
+  resolveSessionModel,
   resolveVertexLocation,
   resolveVertexProject,
 } from './model-resolver';
@@ -79,5 +80,54 @@ describe('model resolution', () => {
     expect(isGoogleCloudProjectId('project-123456')).toBe(true);
     expect(isGoogleCloudProjectId('MIBLU')).toBe(false);
     expect(isGoogleCloudProjectId('blue-label & calc')).toBe(false);
+  });
+});
+
+describe('resolveSessionModel provenance', () => {
+  const original = process.env.AGENT_MODEL;
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.AGENT_MODEL;
+    else process.env.AGENT_MODEL = original;
+  });
+
+  it('reports an explicit choice as explicit', () => {
+    process.env.AGENT_MODEL = 'gemini-2.5-flash';
+
+    expect(resolveSessionModel('gemini-2.5-flash-lite', 'ollama:llama3.2')).toEqual({
+      model: 'ollama:llama3.2',
+      source: 'explicit',
+    });
+  });
+
+  it('reports AGENT_MODEL as an environment choice, above the profile', () => {
+    process.env.AGENT_MODEL = 'gemini-2.5-pro';
+
+    expect(resolveSessionModel('gemini-2.5-flash-lite')).toEqual({
+      model: 'gemini-2.5-pro',
+      source: 'environment',
+    });
+  });
+
+  // The distinction the routing rule turns on: nobody picked this for this run.
+  it('reports the profile default as profile', () => {
+    delete process.env.AGENT_MODEL;
+
+    expect(resolveSessionModel('gemini-2.5-flash-lite')).toEqual({
+      model: 'gemini-2.5-flash-lite',
+      source: 'profile',
+    });
+  });
+
+  it('treats a blank AGENT_MODEL as unset rather than as a choice', () => {
+    process.env.AGENT_MODEL = '   ';
+
+    expect(resolveSessionModel('gemini-2.5-flash-lite').source).toBe('profile');
+  });
+
+  it('keeps resolveModelForSession returning the same string it always did', () => {
+    delete process.env.AGENT_MODEL;
+
+    expect(resolveModelForSession('gemini-2.5-flash-lite')).toBe('gemini-2.5-flash-lite');
   });
 });

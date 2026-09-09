@@ -2,8 +2,32 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as ts from 'typescript';
 
-/** Directories that never form consumer source or ADR catalog input. */
-const IGNORED_DIRECTORIES = new Set(['node_modules', '.git', 'dist', '.next', '.pnpm-store', '.umbra']);
+/**
+ * Directories that never form consumer source or ADR catalog input.
+ *
+ * `.claude` earns its place for a reason the others do not share: it holds
+ * `worktrees/<name>/`, and a git worktree is a **complete second checkout of
+ * the same repository**. Observed on this repository — 241 TypeScript files
+ * under `.claude/worktrees/reverent-bartik-8ddf55/`, appearing the moment a
+ * worktree was created. Walking it does not add a little noise, it doubles the
+ * corpus: every symbol exists twice, at two paths, with two sets of vectors,
+ * and retrieval starts returning the copy. A benchmark measured against such
+ * an index is measuring nothing.
+ *
+ * Other agent tools place worktrees in their own dotted directories. The rule
+ * that generalises is "a dotted tooling directory is not consumer source";
+ * only the one with observed evidence is listed, so this stays a fact rather
+ * than a guess.
+ */
+const IGNORED_DIRECTORIES = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  '.next',
+  '.pnpm-store',
+  '.umbra',
+  '.claude',
+]);
 const ADR_FILE_PATTERN = /^ADR[-_]\d{3,}[-_].+\.md$/i;
 
 /** A path whose persisted identity is relative to one pinned repository root. */

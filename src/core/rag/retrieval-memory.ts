@@ -92,6 +92,31 @@ export class RetrievalMemoryService {
     return [...terms, ...additions].join(' ');
   }
 
+  /**
+   * Every term an operator has explicitly taught this project.
+   *
+   * Read by the unknown-term abstention rule, which must not refuse a question
+   * for using vocabulary the operator deliberately added. `expand` **appends**
+   * its translations and keeps the original wording, so a taught word such as
+   * `bello` survives into the expanded query and would otherwise look like a
+   * word the repository has never contained — which is exactly what it is, and
+   * exactly why `/learn-search` exists (ADR-029). Without this exemption the
+   * abstention rule would silently disable the alias feature.
+   *
+   * @returns Lowercased trigger terms; empty when nothing has been taught.
+   */
+  public knownTerms(): ReadonlySet<string> {
+    const rows = this.db
+      .prepare('SELECT trigger_terms FROM retrieval_aliases')
+      .all() as { trigger_terms: string }[];
+
+    const terms = new Set<string>();
+    for (const row of rows) {
+      for (const term of parseTerms(row.trigger_terms)) terms.add(term);
+    }
+    return terms;
+  }
+
   /** Persists one alias only after an explicit operator action. */
   public approve(alias: RetrievalAlias): boolean {
     const triggerTerms = normalizeAliasTerms(alias.triggerTerms);

@@ -8,6 +8,7 @@ import { IndexerService } from '../rag/indexer';
 import {
   resolveConfiguredModel,
   resolveModelForSession,
+  resolveSessionModel,
   isGeminiModel,
   isOllamaModel,
   isVertexAnthropicModel,
@@ -30,8 +31,10 @@ import {
 import { buildEvidenceProtocolPrompt } from './evidence-protocol';
 import { groundedAnalysisSchema } from './evidence-protocol';
 import { collectWorkspaceEvidence, formatWorkspaceEvidence } from './workspace-evidence';
+import { recordSessionOverhead } from './session-overhead';
 import { LLMProvider } from '../llm/provider';
-import { OllamaChatAdapter } from '../llm/ollama-adapter';
+import { writeLine } from '../observability/console-sink';
+import { OllamaChatAdapter, resolveOllamaBaseUrl } from '../llm/ollama-adapter';
 import { buildOllamaWarning } from '../../presentation/cli/theme';
 import { createOrchestrationGuard } from './orchestration-guard.middleware';
 import { buildSubagentGraphs } from './delegation/subagent-registry';
@@ -222,7 +225,8 @@ export class DeepAgentFactory {
   ): Promise<any> {
     const rootDir = config.rootDir ?? process.cwd();
     const agentConfig = DeepAgentFactory.resolveAgentConfig(rootDir, config.agentConfig);
-    const model = resolveModelForSession(agentConfig.models.supervisor, config.model);
+    const session = resolveSessionModel(agentConfig.models.supervisor, config.model);
+    const model = session.model;
 
     await DeepAgentFactory.bootstrap(rootDir, model, interaction);
 
@@ -232,6 +236,14 @@ export class DeepAgentFactory {
 
     const modelParam = DeepAgentFactory.resolveRuntimeModel(model);
 
+    const tools = resolveCapabilityTools(profile.capabilities);
+
+    // The prompt and the catalog are charged on every turn of this session and
+    // change on none of them. Recorded here because this is the only place that
+    // holds both; without it the context budget measures the conversation and
+    // ignores its own fixed cost (ADR-031 phase 2).
+    recordSessionOverhead(systemPrompt, tools);
+
     const agent = createDeepAgent({
       model: modelParam as any,
       systemPrompt,
@@ -239,8 +251,13 @@ export class DeepAgentFactory {
       middleware: [createIterationBudgetMiddleware(DEFAULT_INTERACTIVE_TOOL_BUDGET, rootDir, {
         limits: { maxCostUsd: agentConfig.limits.maxCostUsd },
         costOf: DeepAgentFactory.buildCostResolver(model),
+        model,
+        // ADR-002 amendment: only a model nobody chose may be routed away from.
+        modelSource: session.source,
+        buildModel: (candidate) => LLMProvider.createChatModel(candidate, 0),
+        onRouted: (notice) => writeLine(notice),
       })],
-      tools: resolveCapabilityTools(profile.capabilities) as any[],
+      tools: tools as any[],
     });
     return registerAgentKernelTelemetry(agent, [profile]);
   }
@@ -318,7 +335,8 @@ export class DeepAgentFactory {
   ): Promise<any> {
     const rootDir = config.rootDir ?? process.cwd();
     const agentConfig = DeepAgentFactory.resolveAgentConfig(rootDir, config.agentConfig);
-    const model = resolveModelForSession(agentConfig.models.supervisor, config.model);
+    const session = resolveSessionModel(agentConfig.models.supervisor, config.model);
+    const model = session.model;
     const enableCompression = config.enableContextCompression ?? true;
 
     // hasSubagents: this mode registers researcher/coder/verifier, so `task`
@@ -368,6 +386,16 @@ export class DeepAgentFactory {
       .filter((profile) => profile.workflowRole === 'advisory')
       .map((profile) => profile.id);
 
+    const supervisorTools = resolveCapabilityTools(supervisorProfile.capabilities, {
+      delegateTool,
+      escalateRouteTool,
+    });
+
+    // The supervisor's own fixed cost, recorded for the same reason as on the
+    // single-agent path. A delegate's narrower catalog is deliberately not
+    // recorded: the turn is charged for what the supervisor carries.
+    recordSessionOverhead(systemPrompt, supervisorTools);
+
     const agent = createDeepAgent({
       model: modelParam as any,
       systemPrompt,
@@ -381,6 +409,11 @@ export class DeepAgentFactory {
         createIterationBudgetMiddleware(DEFAULT_INTERACTIVE_TOOL_BUDGET, rootDir, {
           limits: { maxCostUsd: agentConfig.limits.maxCostUsd },
           costOf: DeepAgentFactory.buildCostResolver(model),
+        model,
+        // ADR-002 amendment: only a model nobody chose may be routed away from.
+        modelSource: session.source,
+        buildModel: (candidate) => LLMProvider.createChatModel(candidate, 0),
+        onRouted: (notice) => writeLine(notice),
         }),
         createOrchestrationGuard({
           maxRetries: agentConfig.limits.maxRetries,
@@ -388,10 +421,7 @@ export class DeepAgentFactory {
           advisoryRoleIds,
         }),
       ] as any[],
-      tools: resolveCapabilityTools(supervisorProfile.capabilities, {
-        delegateTool,
-        escalateRouteTool,
-      }) as any[],
+      tools: supervisorTools as any[],
     });
     return registerAgentKernelTelemetry(agent, [supervisorProfile, ...subagentProfiles]);
   }
@@ -698,7 +728,7 @@ export class DeepAgentFactory {
     model: string,
     interaction?: InteractionService,
   ): Promise<void> {
-    const baseUrl = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
+    const baseUrl = resolveOllamaBaseUrl();
     // Strip the "ollama:" prefix to get the bare model name Ollama expects
     const bareModel = model.startsWith('ollama:') ? model.slice('ollama:'.length) : model;
 

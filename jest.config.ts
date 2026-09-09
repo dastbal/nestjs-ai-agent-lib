@@ -6,6 +6,16 @@ const config: Config = {
   // Busca archivos que terminen en .spec.ts
   testRegex: ".*\\.spec\\.ts$",
 
+  // A git worktree under `.claude/worktrees/<name>/` is a complete second
+  // checkout of this repository, specs included. Without this the suite runs
+  // twice: 183 suites and 1,633 tests instead of 93 and 818, five minutes
+  // instead of two and a half — and a spec edited inside a worktree is
+  // reported as if it were this checkout's, which is the part that misleads.
+  // `dist` is excluded for the same reason: it holds compiled copies.
+  // See ADR-031 and `IGNORED_DIRECTORIES` in `workspace-discovery.ts`, which
+  // has the same hole for the same reason.
+  testPathIgnorePatterns: ["/node_modules/", "/dist/", "/\\.claude/"],
+
   // 1. Usamos ts-jest para procesar archivos .ts y .js
   transform: {
     "^.+\\.(t|j)s$": ["ts-jest", { diagnostics: false }],

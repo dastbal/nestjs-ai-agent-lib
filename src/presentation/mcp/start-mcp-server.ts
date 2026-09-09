@@ -5,178 +5,123 @@ import {
   pinEmbeddingsProvider,
   resolveEmbeddings,
 } from '../../core/rag/embeddings/embeddings-resolver';
+import { formatIndexIntegrity, inspectIndexIntegrity } from '../../core/rag/index-integrity';
 import { readIndexStamp } from '../../core/rag/index-stamp';
 import { IndexerService } from '../../core/rag/indexer';
 import { withProvenance } from './dto-mapper';
 import { buildPromptCatalog } from './prompt-catalog';
+import {
+  activateMcpProjectRoot,
+  McpProjectRoot,
+  resolveMcpProjectRootFromUris,
+} from './project-root';
 import { buildResourceCatalog } from './resource-catalog';
-import { buildToolCatalog } from './tool-catalog';
-import { loadMcpSdk } from './sdk-loader';
+import { loadMcpSdk, McpServerLike } from './sdk-loader';
 import { buildSdkServer } from './sdk-server';
+import { buildToolCatalog, SemanticSearchReadiness } from './tool-catalog';
 
-/**
- * Boots the read-only MCP server over stdio.
- *
- * ## The startup order is part of the decision
- *
- * 1. **Redirect diagnostics to `stderr`.** First, before anything else can
- *    print. `stdout` carries JSON-RPC, and one stray byte corrupts the
- *    connection before the handshake completes — silently, from the client's
- *    side (ADR-024, constraint 4).
- * 2. **Load the SDK.** An optional peer dependency, so its absence is reported
- *    with the install command before any work is done for a server that cannot
- *    start.
- * 3. **Pin the root.** Before any subsystem touches the database, because
- *    `AgentDB` caches its connection on first use and fixes the workspace for
- *    the life of the process.
- * 4. **Resolve and probe embeddings.** The tool list is fixed at launch, so
- *    whether `ask_codebase` can answer has to be known now.
- * 5. **Warm the index.** With no index, semantic search returns nothing and
- *    says nothing (constraint 5).
- * 6. **Serve.**
- *
- * @example
- * ```ts
- * await startMcpServer({ root: '/repos/londonuw-payments', version: '2.1.4' });
- * ```
- */
+/** Lifecycle stages visible while an MCP project root and index are warming. */
+type McpIndexPhase =
+  | 'awaiting-root'
+  | 'starting'
+  | 'probing'
+  | 'indexing'
+  | 'ready'
+  | 'unavailable'
+  | 'failed'
+  | 'skipped';
+
+/** In-memory truth about the current process; durable coverage still lives in SQLite. */
+interface McpIndexLifecycle {
+  phase: McpIndexPhase;
+  message: string;
+  startedAt?: number;
+}
 
 /** Options for {@link startMcpServer}. */
 export interface StartMcpServerOptions {
-  /** Repository to serve. Pinned; never read from a tool argument. */
-  root: string;
+  /** Repository to serve when the launcher already has a trusted project context. */
+  root?: string;
+  /** When true and `root` is absent, request exactly one MCP client root after handshake. */
+  awaitMcpRoot?: boolean;
   /** Package version, reported in `serverInfo`. */
   version: string;
   /** Embedding provider override, e.g. from `--embeddings`. */
   embeddings?: string;
-  /** When true, the index is not warmed at launch. */
+  /** When true, a pre-existing index may be served but no warm-up starts. */
   skipIndex?: boolean;
 }
 
 /**
- * Starts the server and resolves when the client closes the connection.
+ * Starts the read-only MCP server over stdio.
  *
- * @param options - Startup options.
- * @returns Nothing, once stdin ends.
+ * The protocol connection is established before provider probing or indexing.
+ * A slow local model can therefore never consume the client's MCP startup
+ * window. When a globally configured client cannot give Umbra a trustworthy
+ * working directory, the transport still connects and Umbra asks it for one
+ * unambiguous MCP `file:` root before creating `.umbra` or touching SQLite.
  */
 export async function startMcpServer(options: StartMcpServerOptions): Promise<void> {
-  // 1. stdout belongs to the protocol from this line onward.
+  // stdout belongs to JSON-RPC from this line onward.
   setLogSink((line) => process.stderr.write(`${line}\n`));
 
-  // 2. The SDK is an optional peer dependency, so its absence is a normal
-  //    outcome that has to be explained with the command that fixes it — not a
-  //    module-resolution stack trace. Checked before any work is done, because
-  //    warming an index for a server that cannot start wastes the operator's
-  //    time and, on Vertex, their money.
   const load = loadMcpSdk();
   if (!load.available) {
     report(`cannot start: ${load.reason}`);
     process.stderr.write(`\n${load.instruction}\n`);
     throw new Error('The MCP server requires @modelcontextprotocol/sdk.');
   }
-  const sdk = load.sdk;
 
-  // 3. The root is fixed here and nowhere else.
-  pinRuntimeRoot(options.root);
-  const rootDir = runtimeRoot();
-  report(`umbra mcp — serving ${rootDir}`);
+  let rootDir: string | undefined;
+  const lifecycle: McpIndexLifecycle = options.root === undefined
+    ? {
+      phase: 'awaiting-root',
+      message: options.awaitMcpRoot === true
+        ? 'Waiting for one validated MCP project root.'
+        : 'No validated project root was supplied.',
+    }
+    : { phase: 'starting', message: 'MCP connected; preparing the semantic index.' };
 
-  // 4. Can semantic search actually answer?
-  //
-  // The provider is pinned before anything can construct a retriever, because
-  // `askCodebaseTool` builds its own with no argument. Without the pin, the
-  // flag reached the probe and the indexer but not the query: retrieval fell
-  // back to the config default and answered from the wrong column while the
-  // provenance header named the flag's provider. Verified by a live
-  // cross-provider run; the unit tests could not see it, because they inject
-  // the port directly and never take the path a launch flag takes.
-  const selection = resolveEmbeddings(options.embeddings);
-  pinEmbeddingsProvider(selection.port.identity.provider);
-
-  if (selection.ignoredValue !== undefined) {
-    report(
-      `Ignoring unknown embeddings provider "${selection.ignoredValue}". ` +
-        'Valid values: vertex, ollama.',
-    );
+  if (options.root !== undefined) {
+    rootDir = activatePinnedRoot({ rootDir: options.root, source: 'working-directory' });
   }
 
-  const identity = selection.port.identity;
-  report(`embeddings: ${identity.provider}/${identity.model} (from ${selection.source})`);
-
-  const availability = await probeEmbeddings(selection.port);
-
-  if (!availability.available) {
-    // Not published, and the reason is stated. Advertising a tool that fails on
-    // first use is the ADR-013 defect, and here it cannot be corrected
-    // mid-session because the list is fixed at launch.
-    report(`ask_codebase NOT published — ${availability.reason ?? 'embeddings unavailable'}`);
-    report('The other three tools need no credentials and are unaffected.');
-  }
-
-  // 5. A cold index answers nothing and says nothing.
-  if (availability.available && options.skipIndex !== true) {
-    await warmIndex(selection.port);
-  } else if (options.skipIndex === true) {
-    report('Index warming skipped (--no-index).');
-  }
-
-  const stamp = readIndexStamp(rootDir);
-  if (stamp?.status === 'partial') {
-    report(
-      `WARNING: the semantic index is incomplete (${stamp.filesIndexed} files, some failed to ` +
-        'embed). Answers will say so.',
-    );
-  }
-
-  // 6. Serve.
   const tools = buildToolCatalog({
-    semanticSearchAvailable: availability.available,
-    // Provenance is read at call time from the stamp on disk, and the stamp is
-    // written by whoever built the index. It is deliberately NOT taken from the
-    // launch-time selection: doing that produced a header naming one provider
-    // over an answer computed from another's vectors, which is the one outcome
-    // worse than no header at all. If the stamp and the active provider
-    // disagree, the header says so rather than picking a side.
-    decorateSemanticAnswer: (text) => {
-      const current = readIndexStamp(rootDir);
-      const active = resolveEmbeddings().port.identity;
-
-      return withProvenance(text, {
-        provider: current?.provider ?? active.provider,
-        model: current?.model ?? active.model,
-        indexedAt: current?.indexedAt,
-        filesIndexed: current?.filesIndexed,
-        status: current?.status,
-        queriedWith:
-          current !== undefined && current.provider !== active.provider
-            ? `${active.provider}/${active.model}`
-            : undefined,
-      });
-    },
+    semanticSearchReadiness: () => semanticSearchReadiness(rootDir, lifecycle),
+    readIndexStatus: () => describeIndexStatus(rootDir, lifecycle),
+    decorateSemanticAnswer: (text) => decorateSemanticAnswer(rootDir, text),
+    projectRootReady: () => rootDir !== undefined,
+    projectRootMessage: () => lifecycle.message,
   });
-
-  const server = buildSdkServer(sdk, {
+  const server = buildSdkServer(load.sdk, {
     version: options.version,
     instructions:
-      'Umbra publishes read-only knowledge about one repository: its ADR catalog, its AST dependency ' +
-      'graph, a type-level integrity check, and (when an embedding index is available) semantic code ' +
-      'search. It cannot write, run commands, or reach the network. The repository was fixed when this ' +
-      'server was launched and cannot be changed by a tool argument.',
+      'Umbra publishes read-only knowledge about one repository. Its index may be warming in the ' +
+      'background; call get_index_status before retrying ask_codebase. The repository is fixed for ' +
+      'this session and cannot be changed by a tool argument.',
     tools,
-    resources: buildResourceCatalog(rootDir),
+    resources: buildResourceCatalog(() => rootDir, () => describeIndexStatus(rootDir, lifecycle)),
     prompts: buildPromptCatalog(),
   });
 
-  report(`publishing ${tools.length} tools: ${tools.map((t) => t.name).join(', ')}`);
+  if (rootDir === undefined) {
+    wireClientRootResolution(server, options, lifecycle, (resolved) => {
+      rootDir = resolved;
+    });
+    report('umbra mcp — connected without a project root; waiting for client roots.');
+  } else {
+    report(`umbra mcp — serving ${rootDir}`);
+  }
+  report(`publishing ${tools.length} tools: ${tools.map((tool) => tool.name).join(', ')}`);
 
-  // From here the SDK owns stdout. Everything above wrote to stderr, which is
-  // why the sink was redirected on the first line of this function rather than
-  // just before this call.
-  await server.connect(new sdk.StdioServerTransport());
+  // This is intentionally before provider probing and index work.
+  await server.connect(new load.sdk.StdioServerTransport());
+  report('MCP transport connected; index warm-up continues in the background.');
 
-  // `connect` resolves once the transport is wired, not when the client leaves,
-  // so the process is held open by stdin. Waiting on its close is what makes
-  // "client disconnected" mean what it says.
+  if (rootDir !== undefined) {
+    void warmIndexInBackground(rootDir, options, lifecycle);
+  }
+
   await new Promise<void>((resolve) => {
     process.stdin.once('end', () => resolve());
     process.stdin.once('close', () => resolve());
@@ -187,45 +132,208 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<vo
   report('client disconnected');
 }
 
-/**
- * Warms the semantic index, reporting rather than failing.
- *
- * An index that cannot be built is a degraded server, not a broken one: the
- * three credential-free tools still work. Failing to start would withhold them
- * over a problem they do not have.
- *
- * @param port - The embedding port to index with.
- * @returns Nothing.
- */
-async function warmIndex(port: Parameters<typeof probeEmbeddings>[0]): Promise<void> {
-  report('warming the semantic index...');
+/** Pins one accepted root, protects it with gitignore, and reports activation. */
+function activatePinnedRoot(root: McpProjectRoot): string {
+  pinRuntimeRoot(root.rootDir);
+  const rootDir = runtimeRoot();
+  const activation = activateMcpProjectRoot({ ...root, rootDir });
+  if (activation.addedIgnoreRules.length > 0) {
+    report(`added local-state ignore rules: ${activation.addedIgnoreRules.join(', ')}`);
+  }
+  return rootDir;
+}
+
+/** Requests an MCP root only after the client has completed its initialization handshake. */
+function wireClientRootResolution(
+  server: McpServerLike,
+  options: StartMcpServerOptions,
+  lifecycle: McpIndexLifecycle,
+  setRoot: (rootDir: string) => void,
+): void {
+  let requested = false;
+  server.server.oninitialized = () => {
+    if (requested) return;
+    requested = true;
+    void resolveClientRoot(server, options, lifecycle, setRoot);
+  };
+}
+
+/** Validates one client root before any state or provider activity begins. */
+async function resolveClientRoot(
+  server: McpServerLike,
+  options: StartMcpServerOptions,
+  lifecycle: McpIndexLifecycle,
+  setRoot: (rootDir: string) => void,
+): Promise<void> {
+  if (options.awaitMcpRoot !== true) {
+    lifecycle.phase = 'failed';
+    lifecycle.message = 'No validated project root was supplied. Open one project and reconnect.';
+    report(lifecycle.message);
+    return;
+  }
 
   try {
-    // The shared sink was redirected to stderr before startup, so index progress
-    // is safe for JSON-RPC and visible to the operator. This is especially
-    // important for Ollama, whose model load can take minutes.
-    IndexerService.silent = false;
-    await new IndexerService(port).indexProject();
-    report('index ready');
+    const response = await server.server.listRoots();
+    const root = resolveMcpProjectRootFromUris(response.roots.map((candidate) => candidate.uri));
+    const rootDir = activatePinnedRoot(root);
+    setRoot(rootDir);
+    lifecycle.phase = 'starting';
+    lifecycle.message = 'Validated MCP project root; preparing the semantic index.';
+    report(`validated MCP root — serving ${rootDir}`);
+    void warmIndexInBackground(rootDir, options, lifecycle);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    report(`index warming failed: ${message}`);
-    report('ask_codebase may return an explicit index error until this is resolved.');
+    lifecycle.phase = 'failed';
+    lifecycle.message = `Could not validate an MCP project root: ${message}`;
+    report(lifecycle.message);
+  }
+}
+
+/** Starts provider probing and indexing without delaying the MCP handshake. */
+async function warmIndexInBackground(
+  rootDir: string,
+  options: StartMcpServerOptions,
+  lifecycle: McpIndexLifecycle,
+): Promise<void> {
+  lifecycle.phase = 'probing';
+  lifecycle.message = 'Checking the configured embedding provider.';
+  lifecycle.startedAt = Date.now();
+
+  try {
+    const selection = resolveEmbeddings(options.embeddings);
+    pinEmbeddingsProvider(selection.port.identity.provider);
+    const identity = selection.port.identity;
+    report(`embeddings: ${identity.provider}/${identity.model} (from ${selection.source})`);
+
+    if (selection.ignoredValue !== undefined) {
+      report(
+        `Ignoring unknown embeddings provider "${selection.ignoredValue}". Valid values: vertex, ollama.`,
+      );
+    }
+
+    const availability = await probeEmbeddings(selection.port);
+    if (!availability.available) {
+      lifecycle.phase = 'unavailable';
+      lifecycle.message = availability.reason ?? 'The embedding provider is unavailable.';
+      report(`semantic search unavailable — ${lifecycle.message}`);
+      return;
+    }
+
+    if (options.skipIndex === true) {
+      const ready = hasDurableCoverage(rootDir, identity.provider, identity.model);
+      lifecycle.phase = ready ? 'ready' : 'skipped';
+      lifecycle.message = ready
+        ? 'Serving existing durable vector coverage; automatic warm-up was skipped.'
+        : 'Index warm-up was skipped and no durable vector coverage exists.';
+      report(lifecycle.message);
+      return;
+    }
+
+    lifecycle.phase = 'indexing';
+    lifecycle.message = `Indexing with ${identity.provider}/${identity.model}.`;
+    IndexerService.silent = false;
+    const result = await new IndexerService(selection.port, (progress) => {
+      lifecycle.message = progress;
+    }).indexProject();
+
+    if (result.disposition === 'already-running') {
+      lifecycle.phase = 'indexing';
+      lifecycle.message = 'Another Umbra process owns this root index lease; waiting for its durable coverage.';
+      report(lifecycle.message);
+      return;
+    }
+
+    if (hasDurableCoverage(rootDir, identity.provider, identity.model)) {
+      lifecycle.phase = 'ready';
+      lifecycle.message = `Durable vector coverage is ready for ${identity.provider}/${identity.model}.`;
+      report('index ready');
+      return;
+    }
+
+    lifecycle.phase = 'failed';
+    lifecycle.message = 'Indexing ended without complete durable vector coverage. Run umbra doctor --index.';
+    report(lifecycle.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    lifecycle.phase = 'failed';
+    lifecycle.message = `Index warm-up failed: ${message}`;
+    report(lifecycle.message);
   } finally {
     IndexerService.silent = false;
   }
 }
 
-/**
- * Writes one operator-facing line to `stderr`.
- *
- * Deliberately not routed through the log sink: this is the server talking
- * about itself during startup, and it must reach `stderr` even if a future
- * change alters what the sink does.
- *
- * @param message - The line to write.
- * @returns Nothing.
- */
+/** Builds the availability response used by the stable semantic-search tool. */
+function semanticSearchReadiness(
+  rootDir: string | undefined,
+  lifecycle: McpIndexLifecycle,
+): SemanticSearchReadiness {
+  if (rootDir === undefined) return { ready: false, message: lifecycle.message };
+  if (lifecycle.phase !== 'ready') return { ready: false, message: lifecycle.message };
+
+  const stamp = readIndexStamp(rootDir);
+  if (stamp === undefined) return { ready: false, message: 'No durable index stamp exists yet.' };
+  const integrity = inspectIndexIntegrity(rootDir, { provider: stamp.provider, model: stamp.model });
+  return integrity.healthy
+    ? { ready: true, message: lifecycle.message }
+    : { ready: false, message: 'The vector coverage check is incomplete. Run umbra doctor --index.' };
+}
+
+/** Tests persisted coverage without invoking an embedding provider. */
+function hasDurableCoverage(rootDir: string, provider: 'vertex' | 'ollama', model: string): boolean {
+  return inspectIndexIntegrity(rootDir, { provider, model }).healthy;
+}
+
+/** Renders the shared MCP resource/tool view of live and durable index state. */
+function describeIndexStatus(rootDir: string | undefined, lifecycle: McpIndexLifecycle): string {
+  const lines = [
+    `state:         ${lifecycle.phase}`,
+    `message:       ${lifecycle.message}`,
+    `root:          ${rootDir ?? 'not yet validated'}`,
+  ];
+  if (lifecycle.startedAt !== undefined) {
+    lines.push(`started at:    ${new Date(lifecycle.startedAt).toISOString()}`);
+  }
+  if (rootDir === undefined) return lines.join('\n');
+
+  const stamp = readIndexStamp(rootDir);
+  if (stamp !== undefined) {
+    lines.push(
+      `provider:      ${stamp.provider}`,
+      `model:         ${stamp.model}`,
+      `stamp status:  ${stamp.status}`,
+      `files indexed: ${stamp.filesIndexed}`,
+    );
+    lines.push('', formatIndexIntegrity(inspectIndexIntegrity(rootDir, {
+      provider: stamp.provider,
+      model: stamp.model,
+    })));
+  } else {
+    lines.push('', formatIndexIntegrity(inspectIndexIntegrity(rootDir)));
+  }
+
+  return lines.join('\n');
+}
+
+/** Adds provenance only after the readiness boundary has allowed a real search. */
+function decorateSemanticAnswer(rootDir: string | undefined, text: string): string {
+  if (rootDir === undefined) return text;
+  const current = readIndexStamp(rootDir);
+  const active = resolveEmbeddings().port.identity;
+  return withProvenance(text, {
+    provider: current?.provider ?? active.provider,
+    model: current?.model ?? active.model,
+    indexedAt: current?.indexedAt,
+    filesIndexed: current?.filesIndexed,
+    status: current?.status,
+    queriedWith:
+      current !== undefined && current.provider !== active.provider
+        ? `${active.provider}/${active.model}`
+        : undefined,
+  });
+}
+
+/** Writes one operator-facing line to stderr. */
 function report(message: string): void {
   process.stderr.write(`[umbra mcp] ${message}\n`);
 }

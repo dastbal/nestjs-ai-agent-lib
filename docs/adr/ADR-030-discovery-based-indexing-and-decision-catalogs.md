@@ -302,6 +302,87 @@ transaction after embeddings succeed. A failed file retains its previous hash
 or no registry row, so discovery retries it rather than reporting a complete
 index with no vectors. `umbra doctor --index` inspects these tables read-only.
 
+## Amendment — 2026-09-06 · Activation creates state only in a declared root
+
+Global MCP activation now requires the serving root to be declared by a
+manifest, TypeScript configuration, Umbra configuration, or Git metadata; a
+directory named `src` does not qualify. Once accepted, it owns the single
+`.umbra/` workspace described by this record and its `.gitignore` protection is
+established before the directory is created. Discovery rules for source roots
+are unchanged: a declared monorepo still contributes many source projects to
+that one root-owned workspace.
+
+## Amendment — 2026-09-06 · A complete index is durable coverage, not a finished loop
+
+One source file now has one explicit durable outcome in `file_registry`:
+`indexed` after its chunks, active `(provider, model)` vector rows, and
+dependency edges commit together; or `skipped` with a reason only when its
+content is intentionally empty or whitespace. A nonempty source file that
+produces zero chunks is not recorded as fresh. Provider failures, malformed
+embedding batches, and interrupted writes leave the prior hash (or no row), so
+the next index run discovers and retries the path.
+
+`index_lease` is a SQLite single-writer lease with a heartbeat. A second MCP
+process serving the same root does not duplicate embeddings; it reports that a
+live owner is warming the shared index. A stale lease can be recovered safely,
+and release deletes only the owning row.
+
+`umbra doctor --index`, `get_index_status`, and `umbra://index-status` inspect
+the same durable evidence without calling an embedding provider: declared
+source coverage, file outcomes, chunks, vector identities and dimensions,
+missing vectors, zero-chunk indexed files, stale hashes, stamp consistency, and
+the lease. A `complete` stamp is healthy only when those facts agree.
+
+### Verification evidence
+
+- `indexer.spec.ts` covers a failed provider call, nonempty zero-chunk input,
+  and intentional empty-source omission; none can become a false fresh file.
+- `index-run-lease.spec.ts` covers one live writer, heartbeat, stale recovery,
+  and ownership-safe release.
+- `index-integrity.spec.ts` covers selected-provider gaps, chunkless files,
+  stale source content, and absent databases.
+- Focused index/MCP suites: 14 tests passed. `tsc --noEmit` and
+  `git diff --check` passed.
+
+## Amendment — 2026-09-08 · Classless modules are source, not empty index work
+
+`NestChunker#processLogicFile` originally emitted chunks only for classes and
+their methods. Valid infrastructure modules such as CLI entry points, MCP root
+resolvers, and configuration adapters commonly export top-level functions and
+constants instead. They were discovered as source, but produced zero chunks;
+the durable-index rule correctly left them pending, which made every retry fail
+without reaching the embedding provider.
+
+`NestChunker#analyze` now emits one `file` chunk for any nonempty source that
+the class/atomic strategies did not cover. `splitChunksForEmbedding` remains
+the size boundary, so a large module is split before embedding rather than
+being dropped or stored as an oversized vector input. Empty or whitespace-only
+sources remain chunkless and retain their explicit `skipped` outcome.
+
+`IndexerService#failure` keeps repeated file failures in its repaintable TTY
+row. It writes individual messages only to noninteractive logs, then one final
+partial-index summary. This preserves the diagnosis outside a terminal without
+turning an interactive run into one permanent line per file.
+
+### Verification evidence
+
+- `chunker.spec.ts` covers a classless module fallback and whitespace source.
+- `indexer.spec.ts` proves a classless module commits chunks and vectors under
+  the existing per-file transaction.
+- `indexer-progress.spec.ts` proves two TTY failures repaint the same row and
+  append no per-file console line.
+- Focused suites: 3 suites and 7 tests passed; `tsc --noEmit` passed.
+
+### Related files
+
+- `src/core/tools/ast/chunker.ts` — `NestChunker#analyze`.
+- `src/core/tools/ast/chunker.spec.ts` — module fallback coverage.
+- `src/core/rag/indexer.ts` — `IndexerService#failure` and
+  `IndexerService#indexDiscoveredProject`.
+- `src/core/rag/indexer.spec.ts` — durable classless-module vectors.
+- `src/core/rag/indexer-progress.spec.ts` — repaint contract.
+- `src/core/observability/console-sink.ts` — `isInteractiveTerminal`.
+
 ## Related files
 
 - `src/core/config/workspace-discovery.ts` — proposed `WorkspaceDiscoveryService`.

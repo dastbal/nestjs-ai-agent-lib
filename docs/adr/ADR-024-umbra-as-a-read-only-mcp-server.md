@@ -5,7 +5,7 @@
 | **Category** | Architecture · Packaging · Integration |
 | **Author** | David Balladares (decision) · Claude (record) |
 | **Date** | 2026-09-02 |
-| **Status** | ✅ **Accepted** — amended 8× 2026-09-04. Amendment 1 was **wrong** and is corrected in amendment 6 |
+| **Status** | ✅ **Accepted** — amended 9× 2026-09-04. Amendment 1 was **wrong** and is corrected in amendment 6 |
 
 ---
 
@@ -630,6 +630,59 @@ The normal command does not include `--no-index`: the server warms its one
 pinned root at startup. That preserves the original warm-index constraint while
 keeping `--no-index` available only for deliberate diagnostics.
 
+### 9 — 2026-09-04 · One user-scoped registration activates one local index per open project
+
+The project-pinned adapter in amendment 8 was safe, but it made a developer
+repeat setup for every repository. That is friction without an architectural
+benefit: `.umbra/` is already root-bound local state under ADR-018 and ADR-030,
+and an MCP process already exists for the lifetime of one client session.
+
+`umbra setup mcp`, `umbra setup codex`, and `umbra setup claude` now register a
+user-scoped command ending in `umbra mcp --auto-root`. It contains no saved
+project path. At process startup, `resolveMcpProjectRoot` in
+`src/presentation/mcp/project-root.ts` selects Claude Code's
+`CLAUDE_PROJECT_DIR` when present; otherwise it validates the server process
+working directory. The selected directory must exist and look like an
+Umbra-compatible project (`package.json`, `tsconfig.json`, `.git`, `src`, or an
+Umbra/workspace declaration), is canonicalised through `realpath`, and is then
+pinned by `startMcpServer` before any database, provider, or tool catalog is
+created.
+
+This is **not** a root argument exposed to MCP. A caller cannot switch projects
+through a tool or through natural-language instructions. If the client provides
+no valid project context, the server refuses to start and names the recovery:
+open the client from the repository, then reconnect. That is intentionally
+better than creating `.umbra/` beneath a home directory or a client installation
+directory.
+
+Claude Code's official user scope is configured and verified through `claude
+mcp add --scope user` / `claude mcp get`; on native Windows the adapter uses the
+documented `cmd /c npx` wrapper. Codex continues to use `codex mcp add` / `codex
+mcp get`; it launches from its active project working directory. A deliberate
+project-scoped entry may still use the existing explicit `--root <path>` form.
+
+### Verification evidence
+
+- `project-root.spec.ts` covers Claude precedence, working-directory launch,
+  invalid Claude context, and ambiguous-directory rejection.
+- `mcp-config.spec.ts` covers the global stdio definition and the Windows Claude
+  wrapper in addition to the pre-existing project-entry preservation cases.
+- Focused MCP suites: 20 tests passed. Full suite: 86 passed suites, 783 passed
+  tests, with one pre-existing skipped suite and five skipped tests.
+- `node node_modules/typescript/bin/tsc --noEmit --pretty false` and
+  `node node_modules/typescript/bin/tsc -p tsconfig.build.json --pretty false`
+  passed. A built `mcp --auto-root` launch from `C:\Windows` refused before
+  startup and named the required project markers.
+
+### Related files added by this amendment
+
+- `src/presentation/mcp/project-root.ts` — `resolveMcpProjectRoot` and project-marker validation.
+- `src/presentation/mcp/project-root.spec.ts` — trusted root resolution regressions.
+- `src/core/config/mcp-config.ts` — global server definition and verified Codex/Claude adapters.
+- `src/core/config/mcp-config.spec.ts` — global configuration command shapes.
+- `src/bin/cli.ts` — `mcp --auto-root` and global setup commands.
+- `README.md` — one-time global installation and per-project index lifecycle.
+
 ---
 
 ## Next step, if this is accepted
@@ -649,6 +702,56 @@ is worth.
 > binary, and amendment 2 records the shape it took: `ask_codebase` is published
 > when embeddings are available and withheld with a reason when they are not.
 > Three tools are free and credential-free either way.
+
+---
+
+### 10 — 2026-09-06 · A global MCP command has a self-contained runtime
+
+Amendment 6's optional-peer decision is superseded **for the published MCP
+adapter**. The measured package cost remains real, but an optional peer makes a
+clean `@dastbal/umbra` installation capable of accepting `umbra mcp` and then
+failing before its first MCP response. That failure is especially harmful for a
+user-scoped registration because the client has no project-local dependency
+step in which to repair it.
+
+`@modelcontextprotocol/sdk` is therefore a pinned production dependency in
+`package.json`, and the recovery message tells an operator to reinstall Umbra,
+not to assemble a second package manually. The SDK is still loaded lazily from
+its server subpaths so the adapter does not load its HTTP surface during a stdio
+startup.
+
+The user-scoped configuration emitted by
+`buildGlobalUmbraMcpServer` now runs `umbra mcp --auto-root`, not `npx`. The
+one-time documented flow is `npm install -g @dastbal/umbra` followed by
+`umbra setup mcp`, `umbra setup codex`, or `umbra setup claude`. This makes the
+server executable available before the client starts its MCP grace window.
+An explicit `npx ... init` remains a manual way to invoke the CLI, but accepting
+its optional MCP prompt follows this same user-scoped adapter flow. It does not
+write a project-local `.mcp.json`; no install hook or consumer configuration
+write was introduced.
+
+### Verification evidence
+
+- `corepack npm@10.8.2 install --package-lock-only --ignore-scripts` completed
+  successfully and regenerated production dependency flags for the SDK tree.
+- `src/core/config/mcp-config.spec.ts` and
+  `src/presentation/mcp/sdk-server.spec.ts` — 16 tests passed.
+- `node node_modules/typescript/bin/tsc --noEmit --pretty false` — passed.
+- Tarball and clean-consumer smoke testing remain an explicit final release
+  gate; they are not claimed by this amendment.
+
+### Related files added by this amendment
+
+- `package.json` — required `@modelcontextprotocol/sdk` runtime dependency.
+- `package-lock.json` — production dependency closure for the SDK.
+- `src/core/config/mcp-config.ts` — `buildGlobalUmbraMcpServer` and
+  `globalClaudeMcpCommand`.
+- `src/core/config/mcp-config.spec.ts` — global executable command contracts.
+- `src/presentation/mcp/sdk-loader.ts` — `MCP_SDK_INSTALL_HINT`.
+- `src/presentation/mcp/sdk-server.spec.ts` — damaged-installation recovery
+  contract.
+- `src/presentation/mcp/start-mcp-server.ts` — required-runtime startup
+  diagnostic.
 >
 > **What is still open**, and is now the next step:
 >
@@ -660,3 +763,167 @@ is worth.
 >    estimate.
 > 3. **`ask_human` as MCP elicitation** — constraint 2's stated future bridge,
 >    and the prerequisite for anything that writes. Unchanged and unstarted.
+
+---
+
+### 11 — 2026-09-06 · Automatic activation has a stricter project boundary
+
+`resolveMcpProjectRoot` now accepts only durable project declarations:
+`package.json`, `tsconfig.json`, `pnpm-workspace.yaml`, `umbra.json`, or a Git
+directory/worktree marker. A bare `src` directory is not a project declaration
+and is no longer sufficient. The exact home directory and the system temporary
+directory are refused even if a marker happens to exist there.
+
+After this validation, `activateMcpProjectRoot` first ensures the consumer's
+`.gitignore` covers `.umbra/`; only then does it create the root-owned state
+directory. If that ignore guarantee cannot be established, MCP startup fails
+without creating a new unignored workspace. This is an explicit automatic
+activation step, not an install hook and not a write initiated by an MCP tool.
+
+### Verification evidence
+
+- `project-root.spec.ts` and `agent-state-ignore.spec.ts` — 20 tests passed,
+  including a `src`-only directory, Git worktree marker, blocked launch root,
+  first activation, and idempotent activation.
+- `mcp-config.spec.ts` and `sdk-server.spec.ts` — 16 regression tests passed.
+- `node node_modules/typescript/bin/tsc --noEmit --pretty false` — passed.
+
+### Related files added by this amendment
+
+- `src/presentation/mcp/project-root.ts` — `resolveMcpProjectRoot` and
+  `activateMcpProjectRoot`.
+- `src/presentation/mcp/project-root.spec.ts` — launch-boundary and activation
+  regressions.
+- `src/presentation/mcp/start-mcp-server.ts` — activation before MCP state is
+  opened.
+- `src/core/config/workspace-scaffold.ts` — `ensureAgentStateIgnored` reused
+  as the preservation boundary.
+
+---
+
+### 12 — 2026-09-06 · The MCP handshake precedes provider work
+
+The MCP catalog is fixed and connected before Umbra probes an embedding
+provider or begins indexing. A slow Ollama model can therefore never consume a
+client's startup window. The five published tools are stable: `ask_codebase`,
+`get_index_status`, `list_adrs`, `query_dependency_graph`, and
+`run_integrity_check`.
+
+`ask_codebase` remains visible while indexing, but it will not query a partial
+or absent vector store. Until the SQLite coverage check is healthy, it returns a
+structured, retryable tool error that directs the caller to `get_index_status`.
+That status and `umbra://index-status` share one renderer: they report the live
+process lifecycle plus the durable stamp and SQLite coverage without calling a
+provider.
+
+Indexing output is diagnostic-only on stderr. An interactive CLI repaints one
+fixed-width, colour-coded row containing percent, file counter, truncated path,
+vector counter, elapsed time, ETA, and current batch. Errors and milestones
+finish that transient row and remain as permanent lines. Redirected output
+receives complete lines, preserving stdout exclusively for JSON-RPC.
+
+### Verification evidence
+
+- `tool-catalog.spec.ts`, `resource-catalog.spec.ts`, and
+  `sdk-server.spec.ts` — 12 tests passed, covering the stable catalog, the
+  retryable indexing result, and the live index-status resource.
+- `node node_modules/typescript/bin/tsc --noEmit --pretty false` — passed.
+- `git diff --check` — passed.
+
+### Related files added by this amendment
+
+- `src/presentation/mcp/start-mcp-server.ts` — connects before background
+  probe/index work and owns the lifecycle truth.
+- `src/presentation/mcp/tool-catalog.ts` — stable status tool and readiness
+  gate around semantic retrieval.
+- `src/presentation/mcp/resource-catalog.ts` — reads live lifecycle status.
+- `src/core/rag/indexer.ts` — compact progress observer and repaint format.
+- `src/core/observability/console-sink.ts` — fixed-width terminal rendering.
+
+---
+
+### 13 — 2026-09-06 · A global client may declare, but never guess, its root
+
+Global configuration has three trusted root paths. Claude's explicit
+`CLAUDE_PROJECT_DIR` remains first. Codex's verified active project working
+directory remains the normal path. If an auto-root client has no valid working
+directory, Umbra completes the MCP handshake without opening a database and
+requests the client's Roots capability.
+
+Only one local `file:` root that independently passes the project and unsafe
+directory checks is accepted. Multiple roots, non-file URIs, missing roots, and
+unrecognised project declarations leave the server connected but root-gated:
+`get_index_status` explains the recovery, while every root-bound tool returns a
+retryable error. No `.umbra/`, `.gitignore`, SQLite database, provider probe, or
+index run occurs in that state. Once one root is accepted, the existing
+activation and background-index path applies unchanged.
+
+### Verification evidence
+
+- `project-root.spec.ts` covers one MCP `file:` root, multiple valid roots,
+  and a non-file URI.
+- `tool-catalog.spec.ts` and `resource-catalog.spec.ts` cover the root-gated
+  stable catalog and the safe pre-root resource response.
+- Focused MCP/RAG suites: 34 tests passed. `tsc --noEmit` and
+  `git diff --check` passed.
+
+### Related files added by this amendment
+
+- `src/presentation/mcp/project-root.ts` — URI-to-root validation.
+- `src/presentation/mcp/start-mcp-server.ts` — post-handshake Roots request.
+- `src/presentation/mcp/tool-catalog.ts` and `resource-catalog.ts` — safe
+  pre-root status and tool gates.
+- `src/presentation/mcp/sdk-loader.ts` — minimal typed Roots capability.
+- `src/bin/cli.ts` — CWD-first auto-root with Roots fallback.
+
+---
+
+### 14 — 2026-09-08 · Global MCP bootstrap is safe, and its runtime is complete
+
+The former project-local configuration writer
+`ensureUmbraMcpConfiguration` and its root-pinned `configureCodexMcp` companion
+have been removed. Umbra now owns only the verified user-scoped Codex and Claude
+adapters, and generic clients receive a copyable stdio definition. In
+particular, `umbra init` and `umbra setup` never edit an existing local
+`.mcp.json`.
+
+The original top-level decision language remains historical. The current
+boundary is more precise: MCP exposes no chat model, agent loop, command tool,
+write tool, or caller-selected filesystem path. Once a client has declared one
+trusted root, startup may create only that root's `.umbra/` state and
+`.gitignore` entry, then call the configured embedding provider in background.
+Those bootstrap actions are not MCP tool capabilities. Before root validation,
+the server remains connected and root-gated without creating state or probing a
+provider.
+
+The clean-package smoke also found that CLI startup imports TypeScript through
+workspace discovery before it can print help or accept MCP. `typescript@5.9.3`
+is therefore an exact production dependency alongside the required
+`@modelcontextprotocol/sdk@1.30.0`; treating it as a development-only package
+would make a global installation fail before its first response.
+
+### Verification evidence
+
+- `mcp-config.spec.ts` asserts the global binary contract, Windows Claude
+  wrapper, absence of a local `.mcp.json` writer, and both runtime dependencies.
+- Full Jest run: 89 suites passed, 1 skipped; 797 tests passed, 5 skipped.
+  `tsc --noEmit` and the production build passed.
+- A fresh `npm pack` tarball was installed with `--omit=dev --ignore-scripts`.
+  Its `umbra --help` command completed with exit 0.
+- The installed tarball completed a rootless JSON-RPC initialize plus
+  `tools/list` exchange with stdout containing only JSON-RPC and exactly the
+  five stable tools. The empty client directory gained neither `.umbra/` nor
+  `.gitignore`.
+- Host-level client-registration smoke remains explicitly unverified on this
+  machine: the installed Codex CLI cannot resolve its home directory and no
+  Claude executable is present. The adapter command contracts are covered by
+  unit tests; no temporary client entry was left behind.
+
+### Related files
+
+- `package.json` and `package-lock.json` — complete CLI runtime closure.
+- `src/core/config/mcp-config.ts` — global-only verified adapters.
+- `src/core/config/mcp-config.spec.ts` — runtime and no-local-writer contract.
+- `src/bin/cli.ts` — accurate global MCP wording during manual initialization.
+- `README.md` and `src/presentation/mcp/README.md` — current activation,
+  coverage, and removal semantics.

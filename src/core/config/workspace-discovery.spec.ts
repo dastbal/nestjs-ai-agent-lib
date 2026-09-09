@@ -86,6 +86,23 @@ describe('WorkspaceDiscoveryService', () => {
     expect(result.adrCatalogs[1]?.readmePath).toBe('docs/payments/adr/README.md');
   });
 
+  // A git worktree under `.claude/worktrees/` is a complete second checkout of
+  // the same repository. Indexing it does not add noise, it doubles the corpus:
+  // every symbol exists twice, at two paths, and retrieval starts returning the
+  // copy. Observed on this repository the moment a worktree was created.
+  it('does not discover a second checkout of itself inside a tooling worktree', () => {
+    write('src/service.ts', 'export class Service {}');
+    write('.claude/worktrees/spike/src/service.ts', 'export class Service {}');
+    write('.claude/worktrees/spike/docs/adr/ADR-001-copy.md', '# ADR-001: Copy\n\n## Status\n\nAccepted');
+
+    const result = new WorkspaceDiscoveryService(rootDir).discover();
+
+    expect(result.sourceFiles.map((file) => file.relativePath)).toEqual(['src/service.ts']);
+    expect(result.adrCatalogs.map((catalog) => catalog.relativePath)).not.toContain(
+      '.claude/worktrees/spike/docs/adr',
+    );
+  });
+
   function write(relativePath: string, content: string): void {
     const target = path.join(rootDir, relativePath);
     fs.mkdirSync(path.dirname(target), { recursive: true });

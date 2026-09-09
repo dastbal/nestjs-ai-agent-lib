@@ -1311,3 +1311,160 @@ as the old resolution was in place.
    ESM output from a scratch project — not by reading the emitted files.
 3. Keep the CommonJS path byte-identical to today's, so Nest consumers cannot be
    affected by a change made for someone else.
+
+---
+
+## A fixture index, so retrieval quality can be a CI gate
+
+> **Implemented 2026-09-09.** `scripts/build-retrieval-fixture.mjs` builds it,
+> `src/core/rag/retrieval-gate.spec.ts` scores it, and `.github/workflows/test.yml`
+> runs it. The entry is kept rather than deleted: the investigation below is what
+> the implementation was built from, including the two options weighed for query
+> vectors — the pre-computed set was chosen, and it does freeze the query set as
+> predicted. See the 2026-09-09 amendment to ADR-031 for what it measures and
+> what it deliberately cannot.
+
+> Deferred 2026-09-08 while implementing ADR-031 phase 1. The runner, the
+> corpus and the scoring all landed; only the offline path did not.
+
+### The idea
+
+Commit a small fixture index — a SQLite file with `code_chunks`, `chunk_vectors`
+and the FTS5 table already populated for a handful of source files — so
+`bench-retrieval` can score ranking, rank fusion and the abstention policy in
+GitHub Actions with no provider, no network and no credentials.
+
+### What is actually missing
+
+`scripts/bench-retrieval.mjs` launches the compiled MCP binary, which resolves a
+live embedding provider on startup. In CI that means either an Ollama daemon or
+Vertex credentials, and neither exists there. `.github/workflows/test.yml`
+therefore runs type-check, jest and build, and nothing that would notice a
+retrieval regression.
+
+This is the gap that makes every quality number in this repository a local,
+manual observation. The corpus and the metrics are now under version control;
+what is not is the ability to fail a pull request over them.
+
+### The mechanism to reuse
+
+`chunk_vectors` already keys on `(chunk_id, provider, model)`, so a fixture is a
+legitimate identity rather than a special case — `provider: 'fixture'` with its
+own model name cannot be confused with a real one, by construction (ADR-026).
+`vector-codec.ts` writes the BLOBs. `retrieval-metrics.ts` is already pure and
+takes the returned paths, so it needs no change at all.
+
+The query vector is the remaining piece: scoring a query requires embedding it.
+Either the fixture stores pre-computed query vectors keyed by corpus id — which
+makes the run fully offline but freezes the query set — or the CI job embeds
+with a tiny deterministic stub, which tests fusion and abstention but not the
+model. The first is the honest one: it measures ranking, and says so.
+
+### Plan
+
+1. Build the fixture from this repository with `provider: 'fixture'`, over a
+   subset of files large enough that the corpus positives have somewhere to
+   land and small enough to commit.
+2. Store one pre-computed query vector per corpus case beside it.
+3. Add a `--fixture` path to the runner that skips provider resolution and the
+   readiness gate.
+4. Add the job to `test.yml` as a **reporting** step first, and only make it
+   blocking once a few runs establish what the normal variance is. A gate that
+   fails on noise gets disabled within a week.
+
+---
+
+## A corpus health check, because a negative case rots silently
+
+> Deferred 2026-09-08 after the abstention fix. The failure was observed, the
+> guard was not built.
+
+### The idea
+
+`bench-retrieval` already refuses to score a corpus the index cannot answer —
+`assessCorpusCoverage` reports expected paths with no chunk. The mirror check
+for negatives does not exist: report any negative case whose every subject term
+is present in the indexed source, because such a case can no longer prove
+anything about abstention.
+
+### What is actually missing
+
+A negative case is only a negative while the repository stays ignorant of its
+subject. That property is destroyed by ordinary work, and silently:
+
+- `negative-prometheus` stopped being a negative because the TSDoc of
+  `unknown-terms.ts` — written to explain the very defect it proved — named the
+  term. The repository then contained it, the rule correctly called it known,
+  and that case was the one negative still failing the next run. Cause and
+  effect were three hours apart.
+- `negative-redis` was never catchable by term absence at all: `redis` genuinely
+  appears in this repository's source. That one is a fair hard case, not rot,
+  and the check must be able to say so.
+
+Without the guard, a corpus quietly loses its negatives and the correct
+abstention rate drifts up for no reason anyone can see.
+
+### The mechanism to reuse
+
+`findUnknownTerms` already answers exactly this question, and
+`assessCorpusCoverage` is the precedent for the reporting shape — a `null` where
+a rate has no denominator, a named list where something is missing.
+
+### Plan
+
+1. Add `assessNegativeHealth(db, cases)` beside `assessCorpusCoverage`: for each
+   negative, the subject terms the index does not contain. Zero such terms means
+   the case is unprovable.
+2. Print it in the runner's preflight and store it in the report, next to
+   coverage.
+3. Allow a case to declare `unprovableByAbsence: true`, so a deliberately hard
+   negative such as `negative-redis` is not reported as rot every run.
+4. Consider failing the run when a case that used to be provable stops being
+   so — that requires comparing against the previous committed report, which is
+   the first thing the results directory makes possible.
+
+---
+
+## Routing a turn by its size, which ADR-002 currently forbids
+
+> Deferred 2026-09-08 while finishing ADR-031 phase 2. Named as a phase-2 goal
+> in that record; deliberately not built, because building it would contradict
+> an accepted decision without saying so.
+
+### The idea
+
+With a pre-call token count, an oversized request could be sent to a model that
+can hold it — *"this prompt is 40k, it does not fit the local model, send it to
+the cloud one"* — instead of failing.
+
+### Why it is not simply an improvement
+
+[ADR-002](./adr/ADR-002-model-routing-and-bounded-analysis.md) fixes model
+resolution as `--model` > `AGENT_MODEL` > project profile, and says an
+orchestrator role resolves its own profile without reading the environment
+variable. Size-based routing inserts a rung the operator did not write, above
+the one they did. A user who typed `--model ollama:llama3.2` for privacy would
+silently have their prompt sent to Vertex — the failure being that it is
+*silent*, not that it is wrong.
+
+So this is not a phase-2 implementation detail. It is an amendment to ADR-002,
+and it needs David's decision on the question ADR-002 answered: whether anything
+may override an explicit model choice, and whether the operator is asked first.
+
+### What is actually missing besides the decision
+
+No per-model context window exists anywhere in the codebase. `DEFAULT_LLM_PRICING`
+in `src/core/infrastructure/config/default-pricing.ts` is the pattern to copy —
+a shipped table of published facts with a project-local JSON override, and the
+lesson already recorded there that a missing entry must not read as zero.
+
+### Plan
+
+1. Get the decision on ADR-002 first. Options worth putting to David: refuse and
+   explain; ask for approval once per session; route automatically only when the
+   operator expressed no explicit choice.
+2. Add `contextWindow` beside pricing, with the same override mechanism and the
+   same treatment of a missing entry — unknown, never "unlimited".
+3. Early rejection is the half that needs no decision: a request already known
+   to exceed the window can be refused before the round trip, whatever the
+   routing policy turns out to be. It is blocked only on the window table.

@@ -75,6 +75,25 @@ export class NestChunker {
       chunks = this.processLogicFile(sourceFile);
     }
 
+    // A large part of real TypeScript infrastructure is module-oriented:
+    // factories, CLI entry points, configuration adapters, and root resolvers
+    // often export functions/constants without declaring a class. The former
+    // class-only logic path returned no chunks for those valid files, which
+    // made durable indexing leave them pending forever. A file-level fallback
+    // preserves the no-empty-chunk invariant; oversized modules are split by
+    // the embedding preparation layer before any provider call.
+    if (chunks.length === 0 && sourceFile.getFullText().trim().length > 0) {
+      chunks.push({
+        id: uuidv4(),
+        type: 'file',
+        content: sourceFile.getFullText(),
+        metadata: {
+          startLine: 1,
+          endLine: sourceFile.getEndLineNumber(),
+        },
+      });
+    }
+
     // 5. Generate Skeleton (Simplified view for caching)
     // We reuse the logic: if it's atomic, skeleton is full file. If logic, it's signatures.
     const skeleton = isAtomic

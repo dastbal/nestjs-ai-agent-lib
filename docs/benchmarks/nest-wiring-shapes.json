@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "purpose": "Realistic NestJS module shapes, with what a correct extractor must read from each. The measurable is not accuracy but SILENCE: which shapes are read as empty, because that is how this feature fails without anyone noticing.",
+  "shapes": [
+    {
+      "id": "static-module",
+      "why": "The textbook shape every tutorial shows.",
+      "source": "@Module({\n  imports: [SharedModule],\n  controllers: [UsersController],\n  providers: [UsersService],\n  exports: [UsersService],\n})\nexport class UsersModule {}",
+      "expect": {
+        "modules": ["UsersModule"],
+        "tokens": ["SharedModule", "UsersController", "UsersService"]
+      }
+    },
+    {
+      "id": "dynamic-forroot",
+      "why": "Every configurable module in the ecosystem. The decorator is empty and the wiring is in the return value.",
+      "source": "@Module({})\nexport class ConfigModule {\n  static forRoot(options: Options): DynamicModule {\n    return { module: ConfigModule, providers: [ConfigService], exports: [ConfigService] };\n  }\n}",
+      "expect": { "modules": ["ConfigModule"], "tokens": ["ConfigService"] }
+    },
+    {
+      "id": "dynamic-forrootasync",
+      "why": "The async registration shape, whose providers are custom objects with an inject array.",
+      "source": "@Module({})\nexport class DbModule {\n  static forRootAsync(options: AsyncOptions): DynamicModule {\n    return {\n      module: DbModule,\n      providers: [\n        { provide: DB_OPTIONS, useFactory: options.useFactory, inject: options.inject || [] },\n        DbService,\n      ],\n      exports: [DbService],\n    };\n  }\n}",
+      "expect": { "modules": ["DbModule"], "tokens": ["DB_OPTIONS", "DbService"] }
+    },
+    {
+      "id": "register-feature",
+      "why": "The forFeature shape, where an import is a call expression rather than a bare class.",
+      "source": "@Module({\n  imports: [TypeOrmModule.forFeature([User, Order])],\n  providers: [UserRepository],\n})\nexport class UserPersistenceModule {}",
+      "expect": {
+        "modules": ["UserPersistenceModule"],
+        "tokens": ["TypeOrmModule.forFeature([User, Order])", "UserRepository"]
+      }
+    },
+    {
+      "id": "global-module",
+      "why": "A second decorator above @Module must not hide it.",
+      "source": "@Global()\n@Module({ providers: [Logger], exports: [Logger] })\nexport class LoggerModule {}",
+      "expect": { "modules": ["LoggerModule"], "tokens": ["Logger"] }
+    },
+    {
+      "id": "forwardref-import",
+      "why": "Circular module references are written as a call, and must not be dropped.",
+      "source": "@Module({\n  imports: [forwardRef(() => AuthModule)],\n  providers: [UsersService],\n})\nexport class UsersModule {}",
+      "expect": { "modules": ["UsersModule"], "tokens": ["forwardRef(() => AuthModule)", "UsersService"] }
+    },
+    {
+      "id": "reexported-module",
+      "why": "A module can export another module, not only a provider.",
+      "source": "@Module({ imports: [HttpModule], exports: [HttpModule] })\nexport class SharedModule {}",
+      "expect": { "modules": ["SharedModule"], "tokens": ["HttpModule"] }
+    },
+    {
+      "id": "providers-from-const",
+      "why": "A large module often lifts its provider list into a const. A syntax-only extractor cannot follow the reference, and must be honest about that rather than silently reporting nothing.",
+      "source": "const providers = [AService, BService];\n\n@Module({ providers })\nexport class BigModule {}",
+      "expect": { "modules": ["BigModule"], "tokens": [] },
+      "knownLimitation": "Shorthand property with an identifier initializer: the array is not in the decorator. Reported as a module with no bindings."
+    },
+    {
+      "id": "providers-spread",
+      "why": "Conditional or composed provider lists use a spread.",
+      "source": "@Module({ providers: [CoreService, ...featureProviders] })\nexport class MixedModule {}",
+      "expect": { "modules": ["MixedModule"], "tokens": ["CoreService", "...featureProviders"] },
+      "knownLimitation": "The spread element is recorded verbatim; its contents are not resolved."
+    },
+    {
+      "id": "injectable-with-token",
+      "why": "The reason the feature exists: a string token invisible to any import graph.",
+      "source": "@Injectable()\nexport class PaymentService {\n  constructor(\n    @Inject('PAYMENT_GATEWAY') private readonly gateway: Gateway,\n    private readonly repo: PaymentRepository,\n  ) {}\n}",
+      "expect": {
+        "modules": [],
+        "injections": ["PAYMENT_GATEWAY", "PaymentRepository"]
+      }
+    },
+    {
+      "id": "controller-injection",
+      "why": "A controller is an injection site too.",
+      "source": "@Controller('orders')\nexport class OrdersController {\n  constructor(private readonly orders: OrdersService) {}\n}",
+      "expect": { "modules": [], "injections": ["OrdersService"] }
+    },
+    {
+      "id": "optional-injection",
+      "why": "@Optional() sits alongside @Inject and must not displace the token.",
+      "source": "@Injectable()\nexport class CacheService {\n  constructor(@Optional() @Inject('CACHE_TTL') private readonly ttl: number) {}\n}",
+      "expect": { "modules": [], "injections": ["CACHE_TTL"] }
+    },
+    {
+      "id": "plain-class",
+      "why": "An ordinary class with a constructor is not an injection site, and recording it pollutes the graph.",
+      "source": "export class Helper {\n  constructor(private readonly thing: Thing) {}\n}",
+      "expect": { "modules": [], "injections": [] }
+    }
+  ]
+}

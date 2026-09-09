@@ -42,13 +42,21 @@ export interface PublishedResource {
   readonly read: () => McpResourceContents;
 }
 
+/** A root that can become available after the MCP initialization handshake. */
+export type McpRootReader = () => string | undefined;
+
 /**
  * Assembles the resource catalog for a pinned repository root.
  *
  * @param rootDir - The repository this server serves.
+ * @param readLiveIndexStatus - Optional process-local lifecycle status. Durable
+ * coverage is still read from SQLite by the supplied status renderer.
  * @returns The resources to publish.
  */
-export function buildResourceCatalog(rootDir: string): PublishedResource[] {
+export function buildResourceCatalog(
+  rootDir: string | McpRootReader,
+  readLiveIndexStatus?: () => string,
+): PublishedResource[] {
   return [
     {
       descriptor: {
@@ -62,7 +70,10 @@ export function buildResourceCatalog(rootDir: string): PublishedResource[] {
       read: () => ({
         uri: ADR_INDEX_URI,
         mimeType: 'text/markdown',
-        text: formatAdrIndex(buildAdrIndex(rootDir)),
+        text: withProjectRoot(
+          rootDir,
+          (resolvedRoot) => formatAdrIndex(buildAdrIndex(resolvedRoot)),
+        ),
       }),
     },
     {
@@ -77,10 +88,21 @@ export function buildResourceCatalog(rootDir: string): PublishedResource[] {
       read: () => ({
         uri: INDEX_STATUS_URI,
         mimeType: 'text/plain',
-        text: describeIndexStatus(rootDir),
+        text: readLiveIndexStatus?.() ?? withProjectRoot(rootDir, describeIndexStatus),
       }),
     },
   ];
+}
+
+/** Defers a root-bound resource until a client has supplied one safely. */
+function withProjectRoot(
+  root: string | McpRootReader,
+  read: (rootDir: string) => string,
+): string {
+  const rootDir = typeof root === 'string' ? root : root();
+  return rootDir === undefined
+    ? 'Umbra has not received one validated project root yet. Open one project and reconnect.'
+    : read(rootDir);
 }
 
 /**

@@ -47,6 +47,10 @@ export interface IndexStamp {
   readonly indexedAt: number;
   /** How many files were embedded in this run. */
   readonly filesIndexed: number;
+  /** Source files discovered when the stamp was written, when known. */
+  readonly discoveredFiles?: number;
+  /** Source files durably indexed or intentionally skipped, when known. */
+  readonly coveredFiles?: number;
   /** Whether any batch failed. */
   readonly status: IndexStatus;
   /** Discovery failure recorded before any embedding call, when the scope is empty. */
@@ -71,7 +75,13 @@ export const INDEX_STAMP_FILE = 'index.identity.json';
 export function writeIndexStamp(
   rootDir: string,
   identity: EmbeddingsIdentity,
-  run: { filesIndexed: number; status: IndexStatus; diagnostic?: string },
+  run: {
+    filesIndexed: number;
+    status: IndexStatus;
+    diagnostic?: string;
+    discoveredFiles?: number;
+    coveredFiles?: number;
+  },
 ): void {
   const stamp: IndexStamp = {
     provider: identity.provider,
@@ -79,6 +89,8 @@ export function writeIndexStamp(
     dimensions: identity.dimensions,
     indexedAt: Date.now(),
     filesIndexed: run.filesIndexed,
+    discoveredFiles: run.discoveredFiles,
+    coveredFiles: run.coveredFiles,
     status: run.status,
     diagnostic: run.diagnostic,
   };
@@ -121,6 +133,8 @@ export function readIndexStamp(rootDir: string): IndexStamp | undefined {
       dimensions: typeof parsed.dimensions === 'number' ? parsed.dimensions : 0,
       indexedAt: parsed.indexedAt,
       filesIndexed: typeof parsed.filesIndexed === 'number' ? parsed.filesIndexed : 0,
+      discoveredFiles: typeof parsed.discoveredFiles === 'number' ? parsed.discoveredFiles : undefined,
+      coveredFiles: typeof parsed.coveredFiles === 'number' ? parsed.coveredFiles : undefined,
       status: parsed.status === 'partial' || parsed.status === 'empty' ? parsed.status : 'complete',
       diagnostic: typeof parsed.diagnostic === 'string' ? parsed.diagnostic : undefined,
     };

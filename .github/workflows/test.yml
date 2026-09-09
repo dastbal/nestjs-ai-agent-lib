@@ -44,5 +44,16 @@ jobs:
     - name: Run unit tests
       run: npm test
 
+    # The retrieval quality gate. It already ran inside the suite above; naming
+    # it separately is what makes a quality regression legible in the CI log
+    # instead of being one line among nine hundred, and it prints the three
+    # numbers on every run rather than only when it breaks.
+    #
+    # Scores ranking, rank fusion and abstention against a committed fixture —
+    # no provider, no network, no credentials, which is the whole reason it can
+    # run here at all (ADR-031).
+    - name: Retrieval quality gate
+      run: npm run test:gate
+
     - name: Build package
       run: npm run build
