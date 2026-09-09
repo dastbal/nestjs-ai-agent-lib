@@ -2,6 +2,9 @@
   "corpusVersion": 4,
   "split": "calibration",
   "ranAt": "2026-09-08T20:46:45.896Z",
+  "commit": "f8e30b4",
+  "dirtyWorkingTree": true,
+  "provenanceNote": "Taken BEFORE the unknown-term abstention rule and committed in f8e30b4. The commit field did not exist when this ran; it was reconstructed from the commit that carries the file. Correct abstention 0% — do NOT read this side by side with a post-fix run as if the two were comparable.",
   "root": "C:\\Users\\BLUELABEL-PROGRAMMER\\Documents\\london\\London\\nestjs-ai-agent-lib",
   "providers": [
     {

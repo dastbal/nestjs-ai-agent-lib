@@ -39,6 +39,16 @@ export interface RetrievalCorpusCase {
   readonly query: string;
   /** Empty means the correct answer is an abstention — the feature does not exist. */
   readonly expectedPaths: readonly string[];
+  /**
+   * Marks a negative that term absence cannot prove, and is expected not to.
+   *
+   * `negative-redis` asks where Redis is used as the vector store. The word
+   * `redis` genuinely appears in this repository, so nothing about the question
+   * is absent; telling "mentioned" from "used as" needs more than term
+   * presence. That is a fair hard case, not corpus rot, and the health check
+   * must be able to tell the two apart or it cries wolf every run.
+   */
+  readonly unprovableByAbsence?: boolean;
 }
 
 /** What a single case did when it was run against a live retriever. */
@@ -251,6 +261,68 @@ export function assessCorpusCoverage(
     unreachableCases,
     reachableHitCeiling:
       positives.length === 0 ? 1 : (positives.length - unreachableCases.length) / positives.length,
+  };
+}
+
+/** Whether the negative cases can still prove anything about abstention. */
+export interface NegativeHealth {
+  readonly negatives: number;
+  /** Negatives with at least one term the index has never contained. */
+  readonly provable: number;
+  /** Ids of negatives that lost their absent term, sorted. */
+  readonly rotted: readonly string[];
+  /** Ids of negatives declared unprovable by absence on purpose. */
+  readonly knownHard: readonly string[];
+}
+
+/**
+ * Reports whether the negative cases still test anything.
+ *
+ * ## Why a negative rots, and why it does so silently
+ *
+ * A negative case only works while the repository stays ignorant of its
+ * subject, and ordinary work destroys that. Measured twice on this project, by
+ * the same mistake: a negative case about a monitoring product stopped being a
+ * negative because the TSDoc written to *explain the defect it proved* named
+ * the product. The repository then contained the word, the abstention rule
+ * correctly reported it as known, and the case quietly stopped asking anything.
+ * The second time was in this very comment, and this check caught it on the
+ * next run — which is the argument for the check, made at its own expense.
+ *
+ * The rule that follows: describe such a case by shape, never by its term.
+ * Anything written here is indexed source.
+ *
+ * This is the mirror of {@link assessCorpusCoverage}: that one refuses to let a
+ * hit rate be read when the index cannot answer the positives, and this one
+ * refuses to let an abstention rate be read when the negatives have stopped
+ * asking anything.
+ *
+ * @param cases - The negative cases about to be run; positives are ignored.
+ * @param unknownTermsOf - Terms of a case that the index does not contain.
+ * @returns The health assessment.
+ */
+export function assessNegativeHealth(
+  cases: readonly RetrievalCorpusCase[],
+  unknownTermsOf: (corpusCase: RetrievalCorpusCase) => readonly string[],
+): NegativeHealth {
+  const negatives = cases.filter((corpusCase) => corpusCase.expectedPaths.length === 0);
+
+  const knownHard = negatives
+    .filter((corpusCase) => corpusCase.unprovableByAbsence === true)
+    .map((corpusCase) => corpusCase.id)
+    .sort();
+
+  const rotted = negatives
+    .filter((corpusCase) => corpusCase.unprovableByAbsence !== true)
+    .filter((corpusCase) => unknownTermsOf(corpusCase).length === 0)
+    .map((corpusCase) => corpusCase.id)
+    .sort();
+
+  return {
+    negatives: negatives.length,
+    provable: negatives.length - rotted.length - knownHard.length,
+    rotted,
+    knownHard,
   };
 }
 

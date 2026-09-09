@@ -106,9 +106,12 @@ for (const [label, target] of [
   }
 }
 
-const { assessCorpusCoverage, scoreCase, summarizeRun } = await import(
+const { assessCorpusCoverage, assessNegativeHealth, scoreCase, summarizeRun } = await import(
   pathToFileURL(metricsPath).href
 );
+
+const unknownTermsPath = path.join(repoRoot, 'dist', 'core', 'rag', 'unknown-terms.js');
+const { findUnknownTerms } = await import(pathToFileURL(unknownTermsPath).href);
 
 /**
  * Reads the distinct file paths the index actually holds chunks for.
@@ -137,6 +140,37 @@ async function readIndexedPaths(repositoryRoot) {
     }
   } catch (error) {
     console.error(`Coverage preflight skipped: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * Reports whether the negative cases can still prove anything.
+ *
+ * The mirror of the coverage preflight. Coverage stops a hit rate being read
+ * when the index cannot answer the positives; this stops an abstention rate
+ * being read when the negatives have quietly stopped asking. One of them died
+ * during this project's own work, three hours after the commit that killed it,
+ * and nothing in the report said so.
+ *
+ * @param repositoryRoot - The repository being benchmarked.
+ * @returns The health assessment, or `null` when the index is unreadable.
+ */
+async function readNegativeHealth(repositoryRoot) {
+  const dbPath = path.join(repositoryRoot, '.umbra', 'memory.db');
+  if (!fs.existsSync(dbPath)) return null;
+  try {
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      return assessNegativeHealth(cases, (corpusCase) =>
+        findUnknownTerms(db, corpusCase.query),
+      );
+    } finally {
+      db.close();
+    }
+  } catch (error) {
+    console.error(`Negative-health preflight skipped: ${error.message}`);
     return null;
   }
 }
@@ -302,6 +336,16 @@ async function runProvider(provider) {
     // Without it, a case whose target file has no chunk is scored as a ranking
     // failure, and the headline number measures coverage while looking like
     // quality.
+    const negativeHealth = await readNegativeHealth(root);
+    if (negativeHealth && negativeHealth.rotted.length > 0) {
+      console.error(
+        `${provider}: ${negativeHealth.rotted.length} negative case(s) no longer name anything ` +
+          `absent from this repository, so they cannot test abstention any more. ` +
+          `Give them a new subject, or mark them unprovableByAbsence:\n  ` +
+          negativeHealth.rotted.join('\n  '),
+      );
+    }
+
     const indexedPaths = await readIndexedPaths(root);
     const coverage = indexedPaths === null ? null : assessCorpusCoverage(cases, indexedPaths);
     if (coverage && coverage.missingPaths.length > 0) {
@@ -347,6 +391,7 @@ async function runProvider(provider) {
       // against the same index rather than assuming it.
       indexStatus,
       coverage,
+      negativeHealth,
       summaries: summarizeRun(outcomes),
       outcomes,
     };
@@ -356,19 +401,61 @@ async function runProvider(provider) {
   }
 }
 
+/**
+ * Identifies the code the run measured.
+ *
+ * ## Why a report without this is not a data point
+ *
+ * The first two committed reports were named by date, providers and split
+ * alone. A second run the same day therefore overwrote the first — and the two
+ * that survived were taken at different commits, one before an abstention fix
+ * and one after, while sitting side by side in a directory that invites
+ * comparison. Numbers whose code state cannot be recovered are anecdotes with a
+ * schema.
+ *
+ * A dirty tree is recorded rather than refused: a benchmark run mid-change is
+ * often exactly what you want. It just must not be mistaken later for a run of
+ * the commit it happens to sit on.
+ *
+ * @returns Short SHA and whether the tree had uncommitted changes.
+ */
+function codeVersion() {
+  const run = (command) =>
+    childProcess.execSync(command, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+
+  try {
+    return { commit: run('git rev-parse --short HEAD'), dirty: run('git status --porcelain').length > 0 };
+  } catch {
+    // A published package or an exported tarball has no git. Recording
+    // "unknown" keeps the field's meaning honest instead of omitting it.
+    return { commit: 'unknown', dirty: false };
+  }
+}
+
+const code = codeVersion();
 const report = {
   corpusVersion: corpus.version,
   split,
   ranAt: new Date().toISOString(),
+  commit: code.commit,
+  dirtyWorkingTree: code.dirty,
   root,
   providers: [],
 };
 for (const provider of providers) report.providers.push(await runProvider(provider));
 
 const day = report.ranAt.slice(0, 10);
+// The commit is in the filename as well as the body: a directory listing is
+// the first thing anyone reads, and it should already say which runs are
+// comparable.
+const stamp = `${code.commit}${code.dirty ? '-dirty' : ''}`;
 const outputPath = path.resolve(
   valueAfter(args, '--output') ??
-    path.join(repoRoot, 'docs/benchmarks/results', `${day}-${providers.join('-')}-${split}.json`),
+    path.join(
+      repoRoot,
+      'docs/benchmarks/results',
+      `${day}-${providers.join('-')}-${split}-${stamp}.json`,
+    ),
 );
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);
@@ -381,6 +468,14 @@ for (const providerReport of report.providers) {
     console.log(
       `index covers ${coveredPaths}/${expectedPaths} expected paths — ` +
         `reachable hit ceiling ${(reachableHitCeiling * 100).toFixed(0)}%`,
+    );
+  }
+  if (providerReport.negativeHealth) {
+    const { provable, negatives, rotted, knownHard } = providerReport.negativeHealth;
+    console.log(
+      `negatives able to test abstention: ${provable}/${negatives}` +
+        (knownHard.length > 0 ? ` (${knownHard.length} hard by design)` : '') +
+        (rotted.length > 0 ? ` — ${rotted.length} ROTTED` : ''),
     );
   }
   console.table(

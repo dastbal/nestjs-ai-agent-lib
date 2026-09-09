@@ -1,5 +1,6 @@
 import {
   assessCorpusCoverage,
+  assessNegativeHealth,
   scoreCase,
   summarizeRun,
   summarizeSplit,
@@ -210,5 +211,52 @@ describe('assessCorpusCoverage', () => {
     expect(coverage.missingPaths).toEqual(['src/core/rag/hybrid-ranking.ts']);
     expect(coverage.unreachableCases).toEqual([]);
     expect(coverage.reachableHitCeiling).toBe(1);
+  });
+});
+
+describe('assessNegativeHealth', () => {
+  const neg = (id: string, extra: Partial<RetrievalCorpusCase> = {}): RetrievalCorpusCase => ({
+    id,
+    split: 'calibration',
+    query: `Where is ${id}?`,
+    expectedPaths: [],
+    ...extra,
+  });
+
+  it('counts a negative as provable while it still has an absent term', () => {
+    const health = assessNegativeHealth([neg('kafka'), neg('grafana')], () => ['kafka']);
+
+    expect(health).toEqual({ negatives: 2, provable: 2, rotted: [], knownHard: [] });
+  });
+
+  // The measured failure: documenting a negative in indexed source makes the
+  // repository contain its term, and the case stops asking anything.
+  it('reports a negative that lost its absent term', () => {
+    const health = assessNegativeHealth(
+      [neg('kafka'), neg('prometheus')],
+      (corpusCase) => (corpusCase.id === 'prometheus' ? [] : ['kafka']),
+    );
+
+    expect(health.rotted).toEqual(['prometheus']);
+    expect(health.provable).toBe(1);
+  });
+
+  // Otherwise the check cries wolf every run about a case that was never meant
+  // to be provable this way.
+  it('does not report a negative declared unprovable on purpose', () => {
+    const health = assessNegativeHealth(
+      [neg('redis', { unprovableByAbsence: true })],
+      () => [],
+    );
+
+    expect(health.rotted).toEqual([]);
+    expect(health.knownHard).toEqual(['redis']);
+    expect(health.provable).toBe(0);
+  });
+
+  it('ignores positives entirely', () => {
+    const health = assessNegativeHealth([positive], () => []);
+
+    expect(health).toEqual({ negatives: 0, provable: 0, rotted: [], knownHard: [] });
   });
 });

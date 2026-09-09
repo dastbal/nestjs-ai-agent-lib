@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "purpose": "Independent retrieval-quality corpus for Umbra's hybrid RAG. Expected paths are established from source before any provider query.",
   "splits": { "calibration": 55, "holdout": 15 },
   "queries": [
@@ -61,7 +61,7 @@
     { "id": "negative-postgres", "split": "holdout", "query": "Where is a PostgreSQL connection pool configured?", "expectedPaths": [] },
     { "id": "negative-elasticsearch", "split": "holdout", "query": "Where is the Elasticsearch index mapping declared?", "expectedPaths": [] },
     { "id": "negative-s3", "split": "holdout", "query": "Where does Umbra upload RAG chunks to Amazon S3?", "expectedPaths": [] },
-    { "id": "negative-redis", "split": "holdout", "query": "Where is Redis used as the semantic vector store?", "expectedPaths": [] },
+    { "id": "negative-redis", "split": "holdout", "query": "Where is Redis used as the semantic vector store?", "expectedPaths": [], "unprovableByAbsence": true },
     { "id": "negative-webhook", "split": "holdout", "query": "Where is the Stripe webhook signing secret configured?", "expectedPaths": [] },
     { "id": "negative-salesforce", "split": "holdout", "query": "Where is the Salesforce OAuth callback implemented?", "expectedPaths": [] },
     { "id": "negative-prometheus", "split": "calibration", "query": "Where does Umbra expose a Prometheus metrics endpoint?", "expectedPaths": [] },
