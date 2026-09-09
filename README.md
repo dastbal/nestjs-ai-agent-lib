@@ -3,7 +3,7 @@
 [![Umbra](https://img.shields.io/badge/Umbra-Autonomous%20Engineering%20Orchestrator-111111?style=flat-square)](https://github.com/dastbal/umbra)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](https://opensource.org/licenses/MIT)
 
-> Built with ❤️ by **David Balladares** — Principal Software Engineer level autonomous agent for NestJS.
+> Built with ❤️ by **David Balladares**.
 
 Umbra is an autonomous engineering orchestrator for **NestJS** projects. It
 analyzes, plans, writes, and verifies code with specialized subagents through a
@@ -612,6 +612,7 @@ umbra deep "explain src/core/agent/deep-agent-factory.ts"
 *   `ask_codebase`: Performs semantic search over your codebase using RAG.
 *   `refresh_project_index`: Rebuilds the RAG index (e.g., after bulk file writes).
 *   `run_integrity_check`: Runs `tsc --noEmit` to ensure type safety.
+*   `query_nest_graph`: Answers NestJS dependency-injection questions — which module binds a token, which classes inject it, what one module binds.
 *   `run_tests`: Executes Jest test suites.
 
 ---
@@ -662,6 +663,7 @@ Decided in [ADR-024](docs/adr/ADR-024-umbra-as-a-read-only-mcp-server.md).
 |---|---|---|
 | Tool | `list_adrs` | *Why* is the code shaped this way — path, title, status of every decision record, without their bodies |
 | Tool | `query_dependency_graph` | *What breaks if I change this file* — inbound or outbound imports, from the AST |
+| Tool | `query_nest_graph` | *Which module provides this token, and who injects it* — NestJS wiring, including modules whose providers live in a `forRoot()` rather than in the `@Module` decorator |
 | Tool | `run_integrity_check` | `tsc --noEmit` over the served repository |
 | Tool | `ask_codebase` | Semantic search in natural language, with the index's provenance on every answer |
 | Tool | `get_index_status` | Live warm-up state plus durable discovery, chunk, vector, stamp, and lease coverage |
@@ -704,7 +706,7 @@ It waits for a client and prints its startup to **stderr**:
 
 ```
 [umbra mcp] umbra mcp — serving /path/to/repo
-[umbra mcp] publishing 5 tools: ask_codebase, get_index_status, list_adrs, query_dependency_graph, run_integrity_check
+[umbra mcp] publishing 6 tools: ask_codebase, get_index_status, list_adrs, query_dependency_graph, query_nest_graph, run_integrity_check
 [umbra mcp] MCP transport connected; index warm-up continues in the background.
 ```
 
