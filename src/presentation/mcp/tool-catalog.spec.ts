@@ -59,3 +59,46 @@ describe('MCP ask_codebase catalog', () => {
     });
   });
 });
+
+describe('MCP query_nest_graph', () => {
+  const catalog = () =>
+    buildToolCatalog({
+      semanticSearchReadiness: () => ({ ready: true, message: 'ready' }),
+      readIndexStatus: () => 'ready',
+    });
+
+  it('is published alongside the file-level graph, not instead of it', () => {
+    const names = catalog().map((tool) => tool.name);
+
+    expect(names).toContain('query_nest_graph');
+    expect(names).toContain('query_dependency_graph');
+  });
+
+  it('advertises a token or module name rather than a file path', () => {
+    const tool = catalog().find((candidate) => candidate.name === 'query_nest_graph');
+
+    expect(tool?.inputSchema.name).toBeDefined();
+    expect(tool?.inputSchema.direction).toBeDefined();
+    // A `filePath` here would be a contract a model gets wrong exactly when the
+    // token is a string constant that belongs to no file.
+    expect(tool?.inputSchema.filePath).toBeUndefined();
+  });
+
+  it('rejects an empty name instead of querying for nothing', async () => {
+    const tool = catalog().find((candidate) => candidate.name === 'query_nest_graph');
+
+    await expect(tool?.invoke({ name: '   ', direction: 'provides' })).resolves.toEqual({
+      content: [{ type: 'text', text: expect.stringContaining('name is required') }],
+      isError: true,
+    });
+  });
+
+  it('rejects a direction it does not implement', async () => {
+    const tool = catalog().find((candidate) => candidate.name === 'query_nest_graph');
+
+    await expect(tool?.invoke({ name: 'AI_AGENT', direction: 'exports' })).resolves.toEqual({
+      content: [{ type: 'text', text: expect.stringContaining('direction is required') }],
+      isError: true,
+    });
+  });
+});

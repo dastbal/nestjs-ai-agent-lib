@@ -5,7 +5,7 @@
 | **Category** | Quality · Evaluation · Roadmap · Cost |
 | **Author** | David Balladares (decision) · Claude (record) |
 | **Date** | 2026-09-08 |
-| **Status** | ✅ **Accepted** — phase 1 implemented and measured; phase 2 partially implemented; phase 3 ordered, not built |
+| **Status** | ✅ **Accepted** — phases 1, 2 and 3 implemented; phase 1 measured, phase 3 not yet |
 | **Refines** | ADR-019, ADR-024, ADR-028 |
 
 ---
@@ -357,3 +357,81 @@ and early rejection are not implemented.
 - No Vertex run. No paired comparison.
 - The holdout has not been read.
 - The abstention correction is described, not built.
+
+---
+
+## Amendment — 2026-09-09 · Phase 3 is implemented, and this repository could barely test it
+
+`query_nest_graph` is published. `analyzeNestGraph` reads the wiring,
+`nest_bindings` / `nest_injections` / `nest_scan` store it, and the tool answers
+three questions: which module binds a token, which classes inject it, and what
+one module binds.
+
+### What the repository turned out to be
+
+Phase 3 was written on the assumption that a NestJS module graph is what this
+repository has most of. It is not. Three files mention `@Module(`, five carry
+`@Injectable`, and the root module's decorator is literally `@Module({})`.
+
+That last fact stopped the work for an hour and is the most useful thing this
+phase found. The first probe of `@Module({ ... })` returned an object literal
+with **zero properties** and looked like a parser bug. It was not: both of this
+repository's modules are **dynamic modules**, whose real wiring lives in a
+`forRoot()` return value. So does every configurable NestJS module in existence
+— every `forRoot`, `forRootAsync`, `register`. A tool that reads only the
+decorator reports "no providers" for exactly the modules that matter most, and
+reports it confidently.
+
+A generic tool getting that wrong is the argument for this phase, stated more
+precisely than the original record managed: the value is not "a dependency graph
+for NestJS", it is *understanding the shapes NestJS actually ships in*.
+
+### Two defects found by running it, not by testing it
+
+**Injections were recorded for every class with a constructor.** The unit tests
+passed; the first live run over this repository recorded `IndexerService` — an
+ordinary class — as needing `EmbeddingsPort` and `(progress: string) => void`.
+The second is not a token at all. Nest injects only into `@Injectable` and
+`@Controller` classes, and the extractor now says so.
+
+**The graph would have shipped empty.** `FileRegistry#isFileChanged` compares
+content hashes, so an already-indexed repository re-runs the indexer and
+processes nothing: the new tables would have stayed empty forever while the tool
+answered "no modules". This is the third appearance today of one defect shape —
+derived data with no path back for an index that already exists. `nest_scan`
+records the registry's own hash so the backfill has one definition of "changed",
+and reading costs no embedding call.
+
+### Verified through the compiled binary
+
+Six tools published, and the answers below are live output, not fixtures:
+
+```
+provides(AI_AGENT)
+  AiAgentModule exports it — only when registered dynamically
+  AiAgentModule provides it (factory) — only when registered dynamically
+injects(AI_AGENT)
+  AiAgentHttpService (@Inject)  src/presentation/http/ai-agent-http.module.ts
+module(AiAgentHttpModule)
+  controllers: AiAgentHttpController [dynamic]
+  providers: AGENT_HTTP_OPTIONS (value) [dynamic], AiAgentHttpService [dynamic]
+```
+
+`AGENT_HTTP_OPTIONS` is a string constant. It belongs to no file, so no
+file-import graph — and no `grep` for an import — can say where it comes from.
+That single row is the whole argument for the feature.
+
+### Honest limits
+
+- **This repository cannot validate the feature at scale.** Two modules is not
+  a monorepo. The unit tests cover the shapes; nothing here covers a hundred
+  modules, `forwardRef` cycles, or re-exported modules.
+- **No cross-file token resolution.** `findUnexportedInjections` reports a
+  suspicion, never a verdict: Nest resolves a provider without an export inside
+  one module, so presenting its output as a defect list would overstate it.
+- **The retrieval corpus does not cover it.** Every measurement in this record
+  is about `ask_codebase`. `query_nest_graph` has tests and a live check, and
+  **no benchmark** — which is precisely the gap this ADR exists to complain
+  about. A wiring corpus is the obvious next measurement.
+- One full-suite run failed once, immediately after a live `umbra index`, and
+  did not reproduce across four subsequent runs. Recorded rather than dismissed.

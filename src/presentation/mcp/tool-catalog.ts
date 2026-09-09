@@ -3,6 +3,7 @@ import {
   integrityCheckTool,
   listAdrsTool,
   queryDependencyGraphTool,
+  queryNestGraphTool,
 } from '../../core/tools';
 import { z } from 'zod';
 import { McpToolDescriptor, McpToolResult } from './mcp.contracts';
@@ -156,6 +157,53 @@ function publishDependencyGraph(): PublishedTool {
 }
 
 /**
+ * Builds the `query_nest_graph` publication.
+ *
+ * Published beside `query_dependency_graph` rather than folded into it. That
+ * tool's schema is a file path and a direction, because a file import relates
+ * two files. Nest wiring relates a module to a token, and the token is often a
+ * string constant belonging to no file — so one schema carrying both would need
+ * a `filePath` that is sometimes not a path.
+ *
+ * @returns The published tool.
+ */
+function publishNestGraph(): PublishedTool {
+  return {
+    name: 'query_nest_graph',
+    description:
+      'Answers NestJS dependency-injection questions a file-import graph cannot: which module ' +
+      'provides an injection token, which classes inject it, and what one module binds. Works ' +
+      'for string tokens, and for modules whose wiring lives in forRoot() rather than in the ' +
+      '@Module decorator.',
+    inputSchema: {
+      name: z
+        .string()
+        .min(1)
+        .describe('An injection token (AI_AGENT) or a module class name (UsersModule).'),
+      direction: z
+        .enum(['provides', 'injects', 'module'])
+        .describe(
+          'provides = modules that bind this token; injects = classes that ask for it; ' +
+            'module = everything the named module binds.',
+        ),
+    },
+    invoke: async (args) => {
+      const name = typeof args.name === 'string' ? args.name.trim() : '';
+      const direction = args.direction;
+
+      if (name.length === 0) {
+        return toErrorResult('name is required and must be a non-empty string.');
+      }
+      if (direction !== 'provides' && direction !== 'injects' && direction !== 'module') {
+        return toErrorResult('direction is required and must be "provides", "injects" or "module".');
+      }
+
+      return toToolResult(await runTool(queryNestGraphTool, { name, direction }));
+    },
+  };
+}
+
+/**
  * Builds the `run_integrity_check` publication.
  *
  * The empty schema is load-bearing, not an oversight: the tool derives its root
@@ -274,6 +322,7 @@ export function buildToolCatalog(options: {
     publishIndexStatus(options.readIndexStatus),
     publishListAdrs(),
     publishDependencyGraph(),
+    publishNestGraph(),
     publishIntegrityCheck(),
   ];
   if (options.projectRootReady === undefined) return catalog;
