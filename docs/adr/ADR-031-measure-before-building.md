@@ -518,3 +518,86 @@ the silent failure becomes loud.
 The dynamic-module shape is in there because it was caught by accident. Had
 this repository happened to use static modules, phase 3 would have shipped blind
 to the shape that covers every configurable module in the ecosystem.
+
+---
+
+## Amendment — 2026-09-09 · The three deferred items are closed
+
+David approved all four open items. The fourth — the repair path for files
+recorded as indexed with zero chunks — is being done in a separate session and
+is not this record's to claim. The other three are below.
+
+### Early rejection, and the table that unblocked it
+
+The counting shipped days before this; what was missing was anything to compare
+it against. No per-model context window existed anywhere in the codebase, so a
+count of 240,000 tokens was a number nothing could act on.
+
+`DEFAULT_CONTEXT_WINDOWS` inherits `DEFAULT_LLM_PRICING`'s hard-won rule: a
+missing entry there once read as a cost of **zero** rather than as an absence.
+A missing window must never read as *unlimited* — the same defect pointing the
+other way, and worse, because it turns the guard into a rubber stamp exactly
+when the request is enormous. `contextWindowFor` returns `undefined` and the
+check abstains.
+
+Gemini and Ollama are absent on purpose. The table holds only sourced figures;
+filling Gemini's from memory would produce something that looks complete and
+errs in the direction that hurts. Ollama cannot be tabulated at all — its window
+is the local install's `num_ctx`, not a property of the model name.
+
+The check runs in `wrapModelCall`, the only seam that sees the whole request
+before it is sent. Without it the provider answers the same question by charging
+for the trip and returning an error that names no cause, which ADR-007's
+self-healing then treats as a session to reset — so the operator sees a restart
+and no reason.
+
+### Routing, which is an ADR-002 amendment rather than a feature
+
+Recorded in full at [ADR-002](./ADR-002-model-routing-and-bounded-analysis.md).
+The rule David chose: **only a model nobody chose may be routed away from.**
+`--model` and `AGENT_MODEL` are decisions a person made, and arithmetic does not
+override a decision; the project default is not a decision, and may be routed —
+announced, never silently, to the cheapest model that fits rather than the
+largest.
+
+### The CI gate, and what it is not
+
+`bench-retrieval` cannot run in GitHub Actions, which is why every quality
+number in this record was a local observation. The gate scores ranking, rank
+fusion and abstention against a committed fixture: 158 chunks, their vectors,
+one frozen vector per case, 15 positives and **all ten** negatives — the
+abstention policy is what broke, and a subset without them would score only the
+half that was never in doubt.
+
+ADR-028 holds that the compiled binary is the integration boundary, and it still
+does for what it was written about: launch pinning, the published schema, the
+read-only contract. A *quality* gate needs none of those, so this one runs below
+the transport and leaves the binary check to the live benchmark.
+
+Building it found a defect in the first attempt. `RetrieverService` embeds the
+**expanded** query — it runs the request through retrieval memory first — so the
+fixture had frozen vectors of a string production never sends. Builder and gate
+now derive the same form through the same function.
+
+```
+retrieval gate — hit 0.867 · false abstention 0.133 · correct abstention 1.000
+```
+
+**That false-abstention figure is not the live one and must not be quoted as
+such.** The fixture holds 158 chunks against the repository's ~1,000, and the
+unknown-term rule asks whether a query's terms appear anywhere in the index — a
+smaller index makes more terms unknown and the rule stricter. 0.133 here, 0.022
+live; both correct about different things. The gate is a regression detector
+against its own baseline. The live benchmark remains the measurement of quality.
+
+It also does not see the embedding model at all: the vectors are frozen, so
+swapping `nomic-embed-text` for something better would not move a number here.
+
+### Still open
+
+- The repair path for chunkless files, in another session.
+- `query_nest_graph` has a shape-coverage suite and no live measurement at
+  scale; this repository's two modules cannot provide one.
+- The gate's floors were set from a single run. They should be revisited once a
+  few runs establish the real variance, which is the same discipline the
+  deferred-work entry asked for and this record has not yet earned.
