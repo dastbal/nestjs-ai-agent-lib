@@ -1,5 +1,7 @@
-import { ToolMessage } from '@langchain/core/messages';
+import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { createMiddleware } from 'langchain';
+import { checkContextFit, describeContextOverflow } from './context-fit';
+import type { CountableTool } from '../llm/tokens/token-counter.port';
 import {
   countMessagesWithToolCallsArray,
   describeMessageType,
@@ -32,6 +34,14 @@ export interface TurnGovernorOptions {
   onSpend?: (spend: Readonly<TurnSpend>, stopped: TurnDimension | null) => void;
   /** Clock injection point; production uses `Date.now`. */
   now?: () => number;
+  /**
+   * The model this agent will call, enabling the pre-send context check.
+   *
+   * Omitted, the check does not run at all — which is the correct default for
+   * a caller that does not know which model it is bound to, and keeps every
+   * existing construction unchanged.
+   */
+  model?: string;
 }
 
 /**
@@ -117,6 +127,32 @@ export function createIterationBudgetMiddleware(
     },
     wrapModelCall: async (request, handler) => {
       const messages = request.state.messages;
+
+      // Before anything else: will this even fit? The provider would answer the
+      // same question by charging for the round trip and returning an error
+      // about token limits that names no cause — which ADR-007's self-healing
+      // then treats as a tool cycle to reset, so the operator sees a session
+      // restart and no reason. One local count answers it for free.
+      //
+      // Silent unless it refuses, and it only refuses when the window is known:
+      // `contextWindowFor` returns undefined for every model not in the shipped
+      // table, and the check abstains rather than guessing (ADR-031 phase 2).
+      if (options.model !== undefined) {
+        const fit = checkContextFit({
+          model: options.model,
+          system: typeof request.systemPrompt === 'string' ? request.systemPrompt : undefined,
+          tools: (request.tools ?? []) as CountableTool[],
+          messages,
+        });
+
+        if (!fit.fits) {
+          // Returned in place of the model's answer, exactly as the handler
+          // would have: `wrapModelCall` yields the response, so the turn ends
+          // with an explanation instead of a provider error. Nothing is
+          // recorded as usage, because nothing was spent.
+          return new AIMessage(describeContextOverflow(options.model, fit)) as any;
+        }
+      }
       // The counter assumes deepagents hands it messages carrying a `tool_calls`
       // array. That assumption has never been verified against a live run, and
       // telemetry shows turns exceeding this budget by more than one batch can

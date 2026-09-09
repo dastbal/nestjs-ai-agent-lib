@@ -248,6 +248,7 @@ export class DeepAgentFactory {
       middleware: [createIterationBudgetMiddleware(DEFAULT_INTERACTIVE_TOOL_BUDGET, rootDir, {
         limits: { maxCostUsd: agentConfig.limits.maxCostUsd },
         costOf: DeepAgentFactory.buildCostResolver(model),
+        model,
       })],
       tools: tools as any[],
     });
@@ -400,6 +401,7 @@ export class DeepAgentFactory {
         createIterationBudgetMiddleware(DEFAULT_INTERACTIVE_TOOL_BUDGET, rootDir, {
           limits: { maxCostUsd: agentConfig.limits.maxCostUsd },
           costOf: DeepAgentFactory.buildCostResolver(model),
+        model,
         }),
         createOrchestrationGuard({
           maxRetries: agentConfig.limits.maxRetries,
