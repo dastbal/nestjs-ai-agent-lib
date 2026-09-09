@@ -1,7 +1,10 @@
 import { LLMProvider } from '../../llm/provider';
-import { OllamaChatAdapter } from '../../llm/ollama-adapter';
+import {
+  OllamaChatAdapter,
+  probeOllamaEndpoint,
+  resolveOllamaBaseUrl,
+} from '../../llm/ollama-adapter';
 import { EmbeddingsPort } from './embeddings.port';
-import { resolveOllamaBaseUrl } from './ollama-embeddings.adapter';
 
 /**
  * Answers one question before a tool is advertised: *can this actually respond?*
@@ -55,8 +58,11 @@ export async function probeEmbeddings(
 /**
  * Verifies that Ollama is reachable and the embedding model is installed.
  *
- * Reachability reuses `OllamaChatAdapter.preflight`, which already carries a
- * 3-second hard timeout and returns a safe default instead of throwing.
+ * Reachability reuses `OllamaChatAdapter.preflight`, which returns a safe
+ * default instead of throwing. Its budget is `OLLAMA_PROBE_TIMEOUT_MS` **per
+ * attempt**, spent twice only when the first attempt timed out — a machine busy
+ * enough to answer slowly is the case this probe used to get wrong, and getting
+ * it wrong withholds `ask_codebase` for the whole session.
  *
  * @param model - The embedding model that must be present.
  * @returns Availability, with a reason when unavailable.
@@ -103,12 +109,8 @@ async function probeOllama(model: string): Promise<EmbeddingsAvailability> {
  */
 async function listOllamaModels(baseUrl: string): Promise<string[] | undefined> {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-    const response = await fetch(`${baseUrl}/api/tags`, { signal: controller.signal });
-    clearTimeout(timeoutId);
-
-    if (!response.ok) return undefined;
+    const response = await probeOllamaEndpoint(`${baseUrl}/api/tags`);
+    if (response === undefined || !response.ok) return undefined;
 
     const body = (await response.json()) as { models?: { name?: string }[] };
     return (body.models ?? [])

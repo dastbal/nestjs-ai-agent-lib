@@ -1,5 +1,9 @@
 import { OllamaEmbeddings } from '@langchain/ollama';
 import {
+  OLLAMA_DEFAULT_BASE_URL,
+  resolveOllamaBaseUrl,
+} from '../../llm/ollama-adapter';
+import {
   EmbeddingsIdentity,
   EmbeddingsPort,
 } from './embeddings.port';
@@ -21,19 +25,16 @@ export const OLLAMA_EMBEDDINGS_MODEL = 'nomic-embed-text';
 /** Dimensions returned by {@link OLLAMA_EMBEDDINGS_MODEL}. */
 export const OLLAMA_EMBEDDINGS_DIMENSIONS = 768;
 
-/** Where Ollama listens, matching the convention already used for chat. */
-export const OLLAMA_DEFAULT_BASE_URL = 'http://localhost:11434';
-
 /**
- * Resolves the Ollama endpoint from the same environment variable the chat path
- * already honours (`deep-agent-factory.ts`), so a machine that moved Ollama
- * does not have to say so twice.
+ * The endpoint is now owned by `core/llm/ollama-adapter`, which serves every
+ * Ollama path — chat, warmup, and embeddings alike — from one constant. It stays
+ * exported here because callers already reach it through this module, and
+ * because embeddings are where the wrong endpoint was actually felt: the probe
+ * that gates `ask_codebase` runs through it.
  *
- * @returns The configured base URL.
+ * @see {@link resolveOllamaBaseUrl}
  */
-export function resolveOllamaBaseUrl(): string {
-  return process.env.OLLAMA_BASE_URL ?? OLLAMA_DEFAULT_BASE_URL;
-}
+export { OLLAMA_DEFAULT_BASE_URL, resolveOllamaBaseUrl };
 
 /**
  * Local embeddings, with no credentials and no per-query cost.

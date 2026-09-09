@@ -34,7 +34,7 @@ import { collectWorkspaceEvidence, formatWorkspaceEvidence } from './workspace-e
 import { recordSessionOverhead } from './session-overhead';
 import { LLMProvider } from '../llm/provider';
 import { writeLine } from '../observability/console-sink';
-import { OllamaChatAdapter } from '../llm/ollama-adapter';
+import { OllamaChatAdapter, resolveOllamaBaseUrl } from '../llm/ollama-adapter';
 import { buildOllamaWarning } from '../../presentation/cli/theme';
 import { createOrchestrationGuard } from './orchestration-guard.middleware';
 import { buildSubagentGraphs } from './delegation/subagent-registry';
@@ -728,7 +728,7 @@ export class DeepAgentFactory {
     model: string,
     interaction?: InteractionService,
   ): Promise<void> {
-    const baseUrl = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
+    const baseUrl = resolveOllamaBaseUrl();
     // Strip the "ollama:" prefix to get the bare model name Ollama expects
     const bareModel = model.startsWith('ollama:') ? model.slice('ollama:'.length) : model;
 

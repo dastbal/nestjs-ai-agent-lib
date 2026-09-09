@@ -35,7 +35,7 @@ import { AnthropicVertex } from '@anthropic-ai/vertex-sdk';
 import { ChatAnthropic } from '@langchain/anthropic';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ChatVertexAI, VertexAIEmbeddings } from '@langchain/google-vertexai';
-import { OllamaChatAdapter } from './ollama-adapter';
+import { OllamaChatAdapter, resolveOllamaBaseUrl } from './ollama-adapter';
 import { VertexChatAdapter } from './vertex-chat-adapter';
 import {
   isOllamaModel,
@@ -340,7 +340,7 @@ export class LLMProvider {
 
     return new OllamaChatAdapter({
       model: bareModelName,
-      baseUrl: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434',
+      baseUrl: resolveOllamaBaseUrl(),
       temperature,
     });
   }

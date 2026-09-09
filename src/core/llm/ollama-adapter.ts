@@ -24,7 +24,7 @@
  * ```ts
  * const model = new OllamaChatAdapter({
  *   model: 'gemma4:e2b',
- *   baseUrl: 'http://localhost:11434',
+ *   baseUrl: 'http://127.0.0.1:11434',
  *   temperature: 0,
  * });
  * createDeepAgent({ model }); // passes BaseChatModel directly
@@ -34,6 +34,99 @@
 import { ChatOllama } from '@langchain/ollama';
 import { BaseMessage, ToolMessage } from '@langchain/core/messages';
 import type { ChatResult } from '@langchain/core/outputs';
+
+// ── Endpoint resolution ───────────────────────────────────────────────────────
+
+/**
+ * Where Ollama listens, as a **literal IP rather than `localhost`**.
+ *
+ * ## Why not `localhost`
+ *
+ * Windows ships no uncommented `localhost` entry in its hosts file, so the name
+ * goes through the DNS resolver on every fresh process. That lookup is not just
+ * slow, it is *erratic*: measured cold at a 25 ms median but a 237 ms maximum
+ * idle, rising to a 130 ms median and 629 ms maximum under CPU load, with whole
+ * requests observed at 876 ms and 1164 ms. A literal IP is parsed as an address
+ * and performs no lookup at all, which removes that tail by construction
+ * instead of merely shifting the average.
+ *
+ * This is **not** about IPv6 falling back to IPv4. Ollama binds dual-stack
+ * (`0.0.0.0` and `[::]`) and answers on `[::1]` directly; nothing fails and
+ * nothing falls back. The cost is name resolution, not a failed connection.
+ *
+ * An operator who runs Ollama on IPv6, another port, or another host says so
+ * with `OLLAMA_BASE_URL` — see {@link resolveOllamaBaseUrl}.
+ */
+export const OLLAMA_DEFAULT_BASE_URL = 'http://127.0.0.1:11434';
+
+/**
+ * How long a single availability probe may take before it is retried.
+ *
+ * Deliberately short. It is a budget for *one attempt*, not for the decision —
+ * {@link probeOllamaEndpoint} spends it twice when, and only when, the first
+ * attempt timed out.
+ */
+export const OLLAMA_PROBE_TIMEOUT_MS = 3000;
+
+/**
+ * Resolves the Ollama endpoint every path shares.
+ *
+ * `OLLAMA_BASE_URL` always wins, so a machine that moved Ollama — to another
+ * host, another port, or IPv6 only — says so once and every caller honours it.
+ * Absent, the default is {@link OLLAMA_DEFAULT_BASE_URL}.
+ *
+ * This exists in exactly one place on purpose. The same fact was previously
+ * restated as an inline `?? 'http://localhost:11434'` in the chat provider and
+ * the agent factory, which is the defect ADR-027 named — one decision with more
+ * than one default — applied to a URL instead of a provider name.
+ *
+ * @returns The configured base URL.
+ */
+export function resolveOllamaBaseUrl(): string {
+  return process.env.OLLAMA_BASE_URL ?? OLLAMA_DEFAULT_BASE_URL;
+}
+
+/**
+ * Fetches a probe endpoint under {@link OLLAMA_PROBE_TIMEOUT_MS}, retrying once
+ * when — and only when — the first attempt timed out.
+ *
+ * ## Why the retry is conditional
+ *
+ * The two failure modes deserve different answers. An Ollama that is not
+ * running **refuses** the connection in tens of milliseconds (`ECONNREFUSED`,
+ * measured at ~65 ms), so it never reaches the timeout and never pays for the
+ * retry — a first run with no Ollama installed stays as fast as it was, which is
+ * the case ADR-027 optimises for.
+ *
+ * A **timeout** is the ambiguous one: it means something answered too slowly to
+ * distinguish from absent, which is exactly what a loaded machine produces. That
+ * is worth a second attempt, because the probe gates tool advertisement and the
+ * MCP tool list is fixed at launch (ADR-024) — so a false negative withholds
+ * `ask_codebase` for the whole session, while a retry costs one extra budget
+ * only in the case that was already going to fail.
+ *
+ * @param url - Absolute probe URL.
+ * @returns The response, or `undefined` when unreachable after the retry.
+ */
+export async function probeOllamaEndpoint(url: string): Promise<Response | undefined> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), OLLAMA_PROBE_TIMEOUT_MS);
+
+    try {
+      return await fetch(url, { signal: controller.signal });
+    } catch {
+      // `aborted` is what separates "too slow" from "refused": only our own
+      // timer aborts this signal, so a refused connection leaves it false and
+      // gets a definitive answer immediately.
+      if (!controller.signal.aborted) return undefined;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  return undefined;
+}
 
 // ── CPU/RAM preflight types ───────────────────────────────────────────────────
 
@@ -180,11 +273,11 @@ export class OllamaChatAdapter extends ChatOllama {
    * first inference if the system is likely to experience extreme latency
    * (e.g., model swap required due to limited RAM).
    *
-   * @param baseUrl - Ollama base URL (default: `http://localhost:11434`).
+   * @param baseUrl - Ollama base URL; defaults to {@link resolveOllamaBaseUrl}.
    * @returns Preflight result, or a safe default if Ollama is unreachable.
    */
   public static async preflight(
-    baseUrl = 'http://localhost:11434',
+    baseUrl = resolveOllamaBaseUrl(),
   ): Promise<OllamaPreflightResult> {
     const safe: OllamaPreflightResult = {
       ollamaReachable: false,
@@ -195,14 +288,8 @@ export class OllamaChatAdapter extends ChatOllama {
     };
 
     try {
-      // Hard timeout: if Ollama doesn't respond in 3s, it's not reachable.
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
-
-      const res = await fetch(`${baseUrl}/api/ps`, { signal: controller.signal });
-      clearTimeout(timeoutId);
-
-      if (!res.ok) return safe;
+      const res = await probeOllamaEndpoint(`${baseUrl}/api/ps`);
+      if (res === undefined || !res.ok) return safe;
 
       const body = (await res.json()) as { models?: OllamaLoadedModel[] };
       const loadedModels = body.models ?? [];
@@ -238,13 +325,13 @@ export class OllamaChatAdapter extends ChatOllama {
    * so the model stays loaded for the full CLI session without re-loading.
    *
    * @param model - Bare model name (e.g. `"gemma4:e2b"`, NOT `"ollama:gemma4:e2b"`).
-   * @param baseUrl - Ollama base URL.
+   * @param baseUrl - Ollama base URL; defaults to {@link resolveOllamaBaseUrl}.
    * @param onProgress - Optional callback called while waiting for warmup.
    * @returns `true` if warmup succeeded, `false` if it timed out or failed.
    */
   public static async warmup(
     model: string,
-    baseUrl = 'http://localhost:11434',
+    baseUrl = resolveOllamaBaseUrl(),
     onProgress?: (elapsedMs: number) => void,
   ): Promise<boolean> {
     const WARMUP_TIMEOUT_MS = 5 * 60 * 1000; // 5 min max

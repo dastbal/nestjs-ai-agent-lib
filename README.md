@@ -140,8 +140,11 @@ Create a `.env.development` file in the project root:
 # Use the model you pulled with Ollama
 AGENT_MODEL=ollama:gemma4
 
-# Optional: Only if Ollama runs on a non-default port (e.g., 11434)
-# OLLAMA_BASE_URL=http://localhost:11434
+# Optional: point Umbra at a different Ollama endpoint.
+# The default is http://127.0.0.1:11434 — a literal IP on purpose, because
+# resolving "localhost" on Windows costs a DNS lookup that is slow and erratic.
+# Set this only if Ollama runs on another host, another port, or IPv6 only:
+# OLLAMA_BASE_URL=http://[::1]:11434
 ```
 
 **4. Run the agent:**
