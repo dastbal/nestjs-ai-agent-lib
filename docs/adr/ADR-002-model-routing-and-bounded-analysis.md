@@ -66,3 +66,68 @@ de rol y el protocolo de analisis sin herramientas.
   para una investigacion que requiera archivos fuera de esa evidencia.
 - No se aumentara `maxAgentTurns` para resolver conflictos de prompt sin primero
   eliminar la causa del ciclo.
+
+---
+
+## Amendment — 2026-09-09 · A model nobody chose may be routed away from, once, and never silently
+
+This record fixed resolution as `--model` > `AGENT_MODEL` > project profile. A
+pre-send token count (ADR-031 phase 2) made a fourth question answerable: what
+should happen when the resolved model **cannot hold the request at all**.
+
+Refusing is always safe and was implemented first. Routing to a larger model is
+not safe by default, and the reason is specific rather than general: someone who
+typed `--model ollama:llama3.2` for privacy would have their prompt sent to
+Vertex. The problem is that it would happen **silently**, not that it would
+happen.
+
+### The rule
+
+**Only a model nobody chose for this run may be routed away from.** David's
+decision, and it maps exactly onto this record's own ordering:
+
+| Source | Oversized request | Why |
+|---|---|---|
+| `--model` (explicit) | Refuse, explaining | A person chose it this session |
+| `AGENT_MODEL` | Refuse, explaining | A person set it deliberately |
+| Project profile | **May route**, announced | Nobody picked it for this run |
+
+The ordering was never only a precedence list — it also records *who is
+responsible for the choice*. That is what makes this an amendment rather than a
+new rung: the top two rungs are decisions, and a decision is not overridden by
+arithmetic.
+
+### Provenance had to exist first
+
+`resolveModelForSession` returned a bare string, so nothing downstream could
+tell a typed choice from a default. `resolveSessionModel` now returns
+`{ model, source }`, following the discipline ADR-027 established for embedding
+identity: the value and the reason for it travel together, so a later decision
+never infers intent from the value alone. The old function is unchanged and
+delegates to the new one.
+
+### Two details that were not obvious
+
+**The cheapest sufficient model, not the largest.** Reaching for the biggest
+window means routing Haiku to Opus — five times the input price for a request
+whose only fault was length. `candidatesFor` ranks by published input price and
+takes the cheapest that fits, which on this roster routes Haiku to Sonnet.
+
+**A model with an unknown window is never a destination.** Routing *to*
+something this project cannot size would replace a known failure with an
+unmeasurable one, which is the failure shape ADR-017 was written about.
+
+### Always announced
+
+A swap changes both the price and the answer. The turn carries a line naming
+both models, the size, and how to prevent it — `--model` pins a choice and this
+never happens again. A silent route would be the defect, not the feature.
+
+### Implemented in
+
+- `src/core/agent/oversize-routing.ts` — `decideOversizeRoute`, `candidatesFor`
+- `src/core/config/model-resolver.ts` — `resolveSessionModel`, `ModelSource`
+- `src/core/agent/iteration-budget.middleware.ts` — `wrapModelCall`, the only
+  seam that sees the whole request before it is sent
+- `src/core/infrastructure/config/default-context-windows.ts` — what makes any
+  of it decidable

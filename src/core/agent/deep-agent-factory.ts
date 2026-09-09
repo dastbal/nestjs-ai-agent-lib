@@ -8,6 +8,7 @@ import { IndexerService } from '../rag/indexer';
 import {
   resolveConfiguredModel,
   resolveModelForSession,
+  resolveSessionModel,
   isGeminiModel,
   isOllamaModel,
   isVertexAnthropicModel,
@@ -32,6 +33,7 @@ import { groundedAnalysisSchema } from './evidence-protocol';
 import { collectWorkspaceEvidence, formatWorkspaceEvidence } from './workspace-evidence';
 import { recordSessionOverhead } from './session-overhead';
 import { LLMProvider } from '../llm/provider';
+import { writeLine } from '../observability/console-sink';
 import { OllamaChatAdapter } from '../llm/ollama-adapter';
 import { buildOllamaWarning } from '../../presentation/cli/theme';
 import { createOrchestrationGuard } from './orchestration-guard.middleware';
@@ -223,7 +225,8 @@ export class DeepAgentFactory {
   ): Promise<any> {
     const rootDir = config.rootDir ?? process.cwd();
     const agentConfig = DeepAgentFactory.resolveAgentConfig(rootDir, config.agentConfig);
-    const model = resolveModelForSession(agentConfig.models.supervisor, config.model);
+    const session = resolveSessionModel(agentConfig.models.supervisor, config.model);
+    const model = session.model;
 
     await DeepAgentFactory.bootstrap(rootDir, model, interaction);
 
@@ -249,6 +252,10 @@ export class DeepAgentFactory {
         limits: { maxCostUsd: agentConfig.limits.maxCostUsd },
         costOf: DeepAgentFactory.buildCostResolver(model),
         model,
+        // ADR-002 amendment: only a model nobody chose may be routed away from.
+        modelSource: session.source,
+        buildModel: (candidate) => LLMProvider.createChatModel(candidate, 0),
+        onRouted: (notice) => writeLine(notice),
       })],
       tools: tools as any[],
     });
@@ -328,7 +335,8 @@ export class DeepAgentFactory {
   ): Promise<any> {
     const rootDir = config.rootDir ?? process.cwd();
     const agentConfig = DeepAgentFactory.resolveAgentConfig(rootDir, config.agentConfig);
-    const model = resolveModelForSession(agentConfig.models.supervisor, config.model);
+    const session = resolveSessionModel(agentConfig.models.supervisor, config.model);
+    const model = session.model;
     const enableCompression = config.enableContextCompression ?? true;
 
     // hasSubagents: this mode registers researcher/coder/verifier, so `task`
@@ -402,6 +410,10 @@ export class DeepAgentFactory {
           limits: { maxCostUsd: agentConfig.limits.maxCostUsd },
           costOf: DeepAgentFactory.buildCostResolver(model),
         model,
+        // ADR-002 amendment: only a model nobody chose may be routed away from.
+        modelSource: session.source,
+        buildModel: (candidate) => LLMProvider.createChatModel(candidate, 0),
+        onRouted: (notice) => writeLine(notice),
         }),
         createOrchestrationGuard({
           maxRetries: agentConfig.limits.maxRetries,

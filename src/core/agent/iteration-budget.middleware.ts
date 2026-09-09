@@ -1,6 +1,8 @@
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { createMiddleware } from 'langchain';
 import { checkContextFit, describeContextOverflow } from './context-fit';
+import { decideOversizeRoute, describeOversizeRoute } from './oversize-routing';
+import type { ModelSource } from '../config/model-resolver';
 import type { CountableTool } from '../llm/tokens/token-counter.port';
 import {
   countMessagesWithToolCallsArray,
@@ -42,6 +44,22 @@ export interface TurnGovernorOptions {
    * existing construction unchanged.
    */
   model?: string;
+  /**
+   * Who chose {@link model}, which decides whether it may be routed away from.
+   *
+   * Defaults to `explicit` — the conservative reading. A caller that does not
+   * say gets the behaviour that never overrides anything.
+   */
+  modelSource?: ModelSource;
+  /**
+   * Builds a chat model by bare id, for the routing path.
+   *
+   * Injected rather than imported so this middleware keeps no dependency on
+   * provider construction, and so a test can route without a provider.
+   */
+  buildModel?: (model: string) => unknown;
+  /** Notified when a turn was routed to a different model, for the operator. */
+  onRouted?: (notice: string) => void;
 }
 
 /**
@@ -146,11 +164,39 @@ export function createIterationBudgetMiddleware(
         });
 
         if (!fit.fits) {
-          // Returned in place of the model's answer, exactly as the handler
-          // would have: `wrapModelCall` yields the response, so the turn ends
-          // with an explanation instead of a provider error. Nothing is
-          // recorded as usage, because nothing was spent.
-          return new AIMessage(describeContextOverflow(options.model, fit)) as any;
+          // Too large for this model. Whether that is fatal depends on who
+          // chose the model: an explicit `--model` or a deliberate
+          // `AGENT_MODEL` is never overridden, and only a project default that
+          // nobody picked for this run may be routed away from (ADR-002
+          // amendment).
+          const decision = decideOversizeRoute({
+            model: options.model,
+            source: options.modelSource ?? 'explicit',
+            tokens: fit.tokens,
+          });
+
+          if (!decision.route) {
+            // Returned in place of the model's answer, exactly as the handler
+            // would have: `wrapModelCall` yields the response, so the turn ends
+            // with an explanation instead of a provider error. Nothing is
+            // recorded as usage, because nothing was spent.
+            return new AIMessage(
+              `${describeContextOverflow(options.model, fit)}\n\nNot routed elsewhere: ${decision.reason}.`,
+            ) as any;
+          }
+
+          const routed = options.buildModel?.(decision.to);
+          if (routed === undefined) {
+            return new AIMessage(
+              `${describeContextOverflow(options.model, fit)}\n\n` +
+                `${decision.to} would fit, but this session cannot construct it.`,
+            ) as any;
+          }
+
+          // Announced, never silent. A swap changes the price and the answer,
+          // and an operator who cannot see it happen cannot reason about either.
+          options.onRouted?.(describeOversizeRoute(options.model, decision, fit.tokens));
+          return handler({ ...request, model: routed } as typeof request);
         }
       }
       // The counter assumes deepagents hands it messages carrying a `tool_calls`

@@ -173,9 +173,53 @@ export function resolveModelForSession(
   profileModel: string,
   explicitModel?: string,
 ): string {
-  return explicitModel === undefined
-    ? resolveModel(profileModel)
-    : resolveConfiguredModel(explicitModel);
+  return resolveSessionModel(profileModel, explicitModel).model;
+}
+
+/**
+ * Where a resolved model came from.
+ *
+ * `explicit` and `environment` are both operator choices — one typed this
+ * session, one set deliberately in the environment. `profile` is the project
+ * default that nobody chose for this run.
+ *
+ * The distinction exists because ADR-002's ordering is not only a precedence
+ * list: it also says who is responsible for the choice. Anything that would
+ * override a model must know whether a person picked it.
+ */
+export type ModelSource = 'explicit' | 'environment' | 'profile';
+
+/** A resolved model together with who chose it. */
+export interface ResolvedSessionModel {
+  readonly model: string;
+  readonly source: ModelSource;
+}
+
+/**
+ * Resolves the session model and reports which rung of ADR-002 supplied it.
+ *
+ * Follows the provenance discipline ADR-027 established for embeddings: the
+ * chosen value and the reason for it travel together, so a later decision never
+ * has to infer intent from the value alone.
+ *
+ * @param profileModel - Model selected by the project role profile.
+ * @param explicitModel - Optional per-session CLI or API override.
+ * @returns The model and its source.
+ */
+export function resolveSessionModel(
+  profileModel: string,
+  explicitModel?: string,
+): ResolvedSessionModel {
+  if (explicitModel !== undefined) {
+    return { model: resolveConfiguredModel(explicitModel), source: 'explicit' };
+  }
+
+  const fromEnvironment = process.env.AGENT_MODEL;
+  if (fromEnvironment !== undefined && fromEnvironment.trim().length > 0) {
+    return { model: resolveConfiguredModel(fromEnvironment), source: 'environment' };
+  }
+
+  return { model: resolveConfiguredModel(profileModel ?? DEFAULT_MODEL), source: 'profile' };
 }
 
 /**
