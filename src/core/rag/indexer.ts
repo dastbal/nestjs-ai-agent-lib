@@ -1,5 +1,7 @@
 import { FileRegistry } from '../state/file-registry';
 import { NestChunker } from '../tools/ast/chunker';
+import { analyzeNestGraph } from '../tools/ast/nest-graph';
+import { backfillNestGraph, replaceNestGraphForFile } from './nest-graph-store';
 import { AgentDB } from '../state/db';
 import { runtimeRoot } from '../config/runtime-root';
 import {
@@ -220,6 +222,19 @@ export class IndexerService {
     let backfilled: number;
     try {
       backfilled = await this.backfillMissingVectors();
+
+      // Nest wiring is derived from source, not from embeddings, so it is
+      // rebuilt for any file whose scan is missing or stale — including every
+      // file of an index built before this table existed. Without it the graph
+      // stays empty on an up-to-date repository, because nothing re-processes
+      // a file whose content has not changed.
+      const nestFiles = backfillNestGraph(
+        this.db,
+        discovery.sourceFiles,
+        analyzeNestGraph,
+        (absolutePath) => fs.readFileSync(absolutePath, "utf-8"),
+      );
+      if (nestFiles > 0) IndexerService.log(`🧩 Read NestJS wiring from ${nestFiles} files.`);
     } catch (error: unknown) {
       const diagnostic = error instanceof Error ? error.message : String(error);
       writeIndexStamp(rootDir, identity, {
@@ -352,6 +367,12 @@ export class IndexerService {
         insertVector.run(chunk.id, identity.provider, identity.model, vector.length, encodeVector(vector));
       }
       for (const edge of analysis.dependencies) insertEdge.run(edge.sourcePath, edge.targetPath, edge.relation);
+
+      // Nest wiring is replaced inside the same transaction as the chunks it
+      // belongs to. Committed separately it could be half-applied, and a
+      // binding row that outlives the file that declared it is the stale
+      // confidence ADR-017 was written about.
+      replaceNestGraphForFile(this.db, file.relativePath, analyzeNestGraph(file.relativePath, content), hash);
     });
     commit();
     this.reportProgress(file.relativePath, position, total, vectors.length, `saved ${chunks.length} chunks`);

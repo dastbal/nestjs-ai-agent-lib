@@ -297,11 +297,17 @@ export function analyzeNestGraph(filePath: string, source: string): NestGraph {
       }
     }
 
+    // Injections are recorded only for classes Nest actually injects into.
+    // Reading every constructor instead looked harmless and was not: the first
+    // live run over this repository recorded `IndexerService` — an ordinary
+    // class — as needing `EmbeddingsPort` and `(progress: string) => void`.
+    // The second is not a token at all, and neither row describes any wiring
+    // Nest performs. A graph that answers "who injects this" has to contain
+    // only real injection sites, or the answer is noise wearing a schema.
     if (decorators.includes('Injectable') || decorators.includes('Controller')) {
       injectables.push(name);
+      injections.push(...injectionsOf(cls));
     }
-
-    injections.push(...injectionsOf(cls));
   }
 
   return { modules, injectables, bindings, injections };

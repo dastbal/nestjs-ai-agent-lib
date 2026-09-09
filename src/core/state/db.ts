@@ -16,6 +16,7 @@ import {
 } from './vector-extension';
 import { ensureLexicalIndex } from '../rag/lexical-index';
 import { ensureIndexLeaseSchema } from '../rag/index-run-lease';
+import { ensureNestGraphSchema } from '../rag/nest-graph-store';
 import { ensureRetrievalMemory } from '../rag/retrieval-memory';
 import { enrichExistingTSDoc } from '../rag/tsdoc-enrichment';
 
@@ -216,6 +217,11 @@ export class AgentDB {
     // One root owns one writer at a time, even when two MCP clients start the
     // same global Umbra command concurrently.
     ensureIndexLeaseSchema(db);
+
+    // NestJS wiring: which module binds which token, and what each class asks
+    // for. Kept out of `dependency_graph`, which is keyed on file paths and
+    // cannot express a string token that belongs to no file (ADR-031 phase 3).
+    ensureNestGraphSchema(db);
 
     this.migrateEmbeddingColumns();
     this.migrateVectorsToBlobRows();

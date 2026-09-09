@@ -272,3 +272,46 @@ describe('analyzeNestGraph — against this repository', () => {
     ]);
   });
 });
+
+describe('analyzeNestGraph — only real injection sites', () => {
+  // Found by running the extractor over this repository: an ordinary class with
+  // a constructor was recorded as needing `(progress: string) => void`, which
+  // is not a token and describes no wiring Nest performs.
+  it('ignores the constructor of a class Nest never injects into', () => {
+    const graph = analyzeNestGraph(
+      'src/core/rag/indexer.ts',
+      `
+      export class IndexerService {
+        constructor(
+          embeddings: EmbeddingsPort = resolve(),
+          progressObserver?: (progress: string) => void,
+        ) {}
+      }
+      `,
+    );
+
+    expect(graph.injectables).toEqual([]);
+    expect(graph.injections).toEqual([]);
+  });
+
+  it('still reads a decorated class in the same file', () => {
+    const graph = analyzeNestGraph(
+      'src/mixed/mixed.ts',
+      `
+      export class PlainHelper {
+        constructor(private readonly thing: Thing) {}
+      }
+
+      @Injectable()
+      export class RealService {
+        constructor(private readonly repo: Repository) {}
+      }
+      `,
+    );
+
+    expect(graph.injectables).toEqual(['RealService']);
+    expect(graph.injections).toEqual([
+      { consumer: 'RealService', token: 'Repository', explicit: false },
+    ]);
+  });
+});
