@@ -5,7 +5,7 @@
 | **Category** | Quality · Evaluation · Roadmap · Cost |
 | **Author** | David Balladares (decision) · Claude (record) |
 | **Date** | 2026-09-08 |
-| **Status** | ✅ **Accepted** — phases 1, 2 and 3 implemented; phase 1 measured, phase 3 not yet |
+| **Status** | ✅ **Accepted** — all three phases implemented and measured; two phase-2 items deliberately deferred |
 | **Refines** | ADR-019, ADR-024, ADR-028 |
 
 ---
@@ -87,7 +87,7 @@ measured work proceeds, and the deferral quietly becomes permanent.
 
 1. **Calibration gets its own negatives.** Ten new negative cases join
    `calibration` in `docs/benchmarks/embedding-retrieval-corpus.json`
-   (corpus version 4, 70 cases). They are deliberately **different subjects**
+   (corpus version 4 when written, **v5 today**; 70 cases). They are deliberately **different subjects**
    from the holdout negatives — Prometheus, GraphQL, Kafka, Terraform and so on
    rather than the holdout's Redis, Kubernetes and Stripe — because reusing a
    subject leaks the holdout through the calibration set. Each term was
@@ -114,10 +114,12 @@ measured work proceeds, and the deferral quietly becomes permanent.
    the mistake is easy and invisible.
 
 5. **Reports are committed**, to `docs/benchmarks/results/`, named by date,
-   providers and split. `docs/benchmarks/results/README.md` states how to read
-   one and why the `all` row is never the headline.
+   providers and split — **and, since the 2026-09-09 amendment, by commit**,
+   because naming without it let one run overwrite another and left two
+   incomparable reports side by side. `docs/benchmarks/results/README.md`
+   states how to read one and why the `all` row is never the headline.
 
-### Phase 2 — Counting the prompt before paying for it *(ordered, not built)*
+### Phase 2 — Counting the prompt before paying for it *(implemented, except routing and early rejection — see the 2026-09-08 amendment)*
 
 A `TokenCounterPort` in the domain with per-provider adapters — Anthropic's
 `count_tokens` endpoint, Gemini's `countTokens`, a local tokenizer for Ollama —
@@ -141,7 +143,7 @@ settle is whether the embedding adapters emit any trace at all — they implemen
 Umbra's own `embeddings.port.ts` rather than LangChain's `Embeddings`, so a
 large `umbra index` is likely invisible to LangSmith.
 
-### Phase 3 — `query_dependency_graph` over NestJS modules *(ordered, not built)*
+### Phase 3 — `query_dependency_graph` over NestJS modules *(implemented as `query_nest_graph` — see the 2026-09-09 amendments)*
 
 The MCP surface is where Umbra is infrastructure for someone else's agent
 rather than a competitor to it, and a dependency graph that understands
