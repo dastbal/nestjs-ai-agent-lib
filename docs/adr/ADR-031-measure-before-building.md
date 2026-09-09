@@ -435,3 +435,84 @@ That single row is the whole argument for the feature.
   about. A wiring corpus is the obvious next measurement.
 - One full-suite run failed once, immediately after a live `umbra index`, and
   did not reproduce across four subsequent runs. Recorded rather than dismissed.
+
+---
+
+## Amendment — 2026-09-09 · The gap this record complained about, closed on itself
+
+Two measurement defects and one missing measurement, all found by reading the
+work back rather than by running it.
+
+### A report without its commit is an anecdote with a schema
+
+The first two committed reports were named by date, providers and split alone.
+Within a day that produced both failures it could: a second run overwrote the
+first, and the two that survived were taken at **different commits** — one
+before the abstention fix and one after — while sitting side by side in a
+directory whose entire purpose is comparison.
+
+Reports now carry `commit` and `dirtyWorkingTree`, and the filename carries them
+too. A dirty tree is recorded rather than refused: benchmarking mid-change is
+often the point, it just must not later be read as a run of the commit it sits
+on. The two earlier reports were renamed and carry a `provenanceNote`.
+
+`docs/benchmarks/results/README.md` now lists the four things to check, in
+order, before believing any difference: same corpus version, same reachable
+ceiling, same provable negatives, and only then the retriever.
+
+### A negative case rots, and it rotted twice
+
+`assessNegativeHealth` is the mirror of the coverage preflight. Coverage stops a
+hit rate being read when the index cannot answer the positives; this stops an
+abstention rate being read when the negatives have stopped asking anything.
+
+It proved itself on its first run, at this record's expense. The run reported
+one rotted negative, and the cause was the TSDoc written **inside the very
+function built to detect this**, which named the term again. Correct abstention
+had already slipped 100% → 90% for that reason alone, and nothing else would
+have explained it. Removing the word restored 10/10.
+
+A case that is hard on purpose — a subject this repository mentions but does not
+implement — is marked `unprovableByAbsence` in corpus v5, so the check
+distinguishes a hard case from rot instead of crying wolf every run.
+
+### Measured at 9f7d0bc
+
+| | |
+|---|---|
+| Hit@4 | 84.4% |
+| MRR | 0.689 |
+| False abstention | 2.2% |
+| Correct abstention | 100% |
+| Coverage | 43/43, ceiling 100% |
+| Negatives provable | 10/10 |
+
+Hit@4 moved 86.7% → 84.4% against the previous day: 38 of 45 rather than 39.
+Inspecting the cases shows one abstention and six ranking misses to close
+neighbours, and the index gained about twelve source files that day, so the
+competition changed. **Nothing in the retriever moved.** That explanation exists
+only because the report now records which commit and which coverage it was taken
+under — which is the argument for the change, demonstrated by the first number
+it produced.
+
+### `query_nest_graph` is measured too, by a different kind of suite
+
+Phase 3 shipped with no measurement, which this record called out as its own
+gap. It is closed, but not with a benchmark: the tool answers from SQL rather
+than from ranking, so there is no hit rate to compute. Its failure mode is
+worse than a bad rank — given a shape it does not understand it reports
+**nothing**, and "this module has no providers" is indistinguishable from "this
+module was not understood".
+
+`docs/benchmarks/nest-wiring-shapes.json` holds thirteen shapes NestJS is
+actually written in — `forRoot`, `forRootAsync` with a factory and an inject
+array, `forFeature` as a call expression, `@Global`, `forwardRef`, a re-exported
+module, a spread provider list, `@Optional() @Inject()`, and a plain class that
+must **not** be read as an injection site. Eleven are read; two are declared
+limitations (a provider array lifted into a `const`, and the contents of a
+spread). The suite fails if any shape that expects bindings produces none, so
+the silent failure becomes loud.
+
+The dynamic-module shape is in there because it was caught by accident. Had
+this repository happened to use static modules, phase 3 would have shipped blind
+to the shape that covers every configurable module in the ecosystem.
