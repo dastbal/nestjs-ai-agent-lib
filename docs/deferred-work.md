@@ -1316,6 +1316,14 @@ as the old resolution was in place.
 
 ## A fixture index, so retrieval quality can be a CI gate
 
+> **Implemented 2026-09-09.** `scripts/build-retrieval-fixture.mjs` builds it,
+> `src/core/rag/retrieval-gate.spec.ts` scores it, and `.github/workflows/test.yml`
+> runs it. The entry is kept rather than deleted: the investigation below is what
+> the implementation was built from, including the two options weighed for query
+> vectors — the pre-computed set was chosen, and it does freeze the query set as
+> predicted. See the 2026-09-09 amendment to ADR-031 for what it measures and
+> what it deliberately cannot.
+
 > Deferred 2026-09-08 while implementing ADR-031 phase 1. The runner, the
 > corpus and the scoring all landed; only the offline path did not.
 
