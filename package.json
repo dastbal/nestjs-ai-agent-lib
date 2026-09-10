@@ -45,6 +45,7 @@
     "lint": "node node_modules/typescript/bin/tsc --noEmit",
     "bench:retrieval": "node scripts/bench-retrieval.mjs",
     "bench:fts-only": "node scripts/bench-fts-only.mjs",
+    "bench:graph": "node scripts/bench-graph-recall.mjs",
     "bench:fixture": "node scripts/build-retrieval-fixture.mjs",
     "test:gate": "jest --runInBand src/core/rag/retrieval-gate.spec.ts"
   },

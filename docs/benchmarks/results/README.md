@@ -143,10 +143,37 @@ the report's `latencyExcludes` field lists exactly what is missing. Its hit rate
 *is* comparable — same corpus, same compiled ranking modules, same coverage
 preflight — and its milliseconds are not.
 
+## The graph arm, which needs no corpus at all
+
+`npm run bench:graph` writes a third kind of report, `arm: 'graph-recall'`. It
+does not score retrieval: it rebuilds the dependency graph independently with
+`ts-morph` — every file in the tree, every import-like construct, resolved by
+probing more shapes than the indexer does — and diffs it against the
+`dependency_graph` table `query_dependency_graph` reads. There is no ground truth
+to curate, because the source **is** the ground truth.
+
+It reports recall **per construct**, following the precedent
+`nest-wiring-shapes.json` set: name the shapes the tool goes blind to rather than
+publishing one number that hides them. And it separates two kinds of miss, only
+one of which is a defect:
+
+- **out-of-scope** — the importing file is a spec, a `.d.ts` or a story, so it has
+  no chunks and can never be a `source` row. That is ADR-030's discovery scope, a
+  recorded decision, and its consequence for this tool is recorded in that
+  record's 2026-09-10 amendment.
+- **gap** — a construct the indexer walked past inside a file it *did* index.
+
+A construct present in the tree that produced no in-repo edge is reported as
+`unmeasurable-here` with its occurrence count, never omitted. A row that
+disappears from a table reads as covered, and two of the suspected holes — a
+relative specifier resolving to `.tsx`, and a tsconfig path alias — cannot be
+observed on a repository that contains neither.
+
 ## Related
 
 - `docs/benchmarks/embedding-retrieval-corpus.json` — the corpus.
 - `scripts/bench-retrieval.mjs` — the runner.
 - `scripts/bench-fts-only.mjs` — the control arm.
+- `scripts/bench-graph-recall.mjs` — the graph arm.
 - `src/core/rag/retrieval-metrics.ts` — the scoring rule, under test.
 - `docs/adr/ADR-031-measure-before-building.md` — why this exists.
