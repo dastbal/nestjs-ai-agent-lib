@@ -5,7 +5,7 @@
 | **Category** | Architecture · Packaging · Integration |
 | **Author** | David Balladares (decision) · Claude (record) |
 | **Date** | 2026-09-02 |
-| **Status** | ✅ **Accepted** — amended 9× 2026-09-04. Amendment 1 was **wrong** and is corrected in amendment 6 |
+| **Status** | ✅ **Accepted** — amended 16× 2026-09-04 → 2026-09-10. Amendment 1 was **wrong** and is corrected in amendment 6 |
 
 ---
 
@@ -984,3 +984,66 @@ consumer runs, so a fix to startup cost only reaches them on release.
   indexing was never a variable, alternating to separate route cost from the
   cost of being first.
 - The two `.mcp.json` forms were both exercised; the shim resolved and answered.
+
+### 16 — 2026-09-10 · Readiness asks whether the index can answer, not whether it is current
+
+This record's constraint says semantic retrieval "stays retryable until durable
+vector coverage is verified". That held, and the verification was doing more than
+the sentence claims: it ran the **full** index inspection on every
+`ask_codebase` call.
+
+Measured back to back on one index: **401 ms** for the full sweep against
+**52 ms** for a check that touches no filesystem, while the search it guards is
+2 to 5 ms. Of the eleven conjuncts the full report combines, exactly two are
+expensive, and both exist to notice a change the database cannot see —
+`discoverSources()` walks the tree and parses tsconfig, and the staleness check
+md5-hashes every discovered source file.
+
+### The distinction this amendment draws
+
+Those two answer *is the index current?* The gate needs *can the index answer?*,
+and the two have different remedies:
+
+| State | Consequence | Gate |
+| --- | --- | --- |
+| a chunk has no vector for the active identity | the result set would be **wrong** | refuses |
+| a source file changed since the last run | one answer may be **dated** | serves |
+
+The second used to refuse the question entirely — in the middle of a refactor,
+at exactly the moment somebody asks. Serving it is the better answer, and it is
+honest only because the reply already carries the index's age: `withProvenance`
+emits `indexedAt`, `filesIndexed` and `status` on every answer, so a caller
+judges staleness itself rather than being told nothing. That was already wired.
+
+**Retryability is unchanged for everything it was written about.** A warming
+index, an absent stamp, a partial stamp, missing vectors, a chunkless file, a
+dimension conflict and an active writer lease all still refuse, still name the
+reason, and still direct the caller to `get_index_status`.
+
+### Completeness moved rather than stopped
+
+`get_index_status`, `umbra doctor --index` and the boot-time coverage check all
+still run the full report. So do both benchmark runners, which refuse on a stale
+index exactly as before — scoring an index is a different job from serving it,
+and conflating them is what made the gate expensive.
+
+### Rejected alternatives
+
+- **Cache the full sweep behind a short TTL.** Still pays it every interval, and
+  invents a staleness window that was not previously there. It keeps the contract
+  literally while making the failure ADR-025 exists to prevent — a stale "ready"
+  over a broken index — newly possible.
+- **Swap md5 for mtime.** Keeps the cost structure and adds a second definition
+  of "changed" beside the registry's hash, which is what `backfillNestGraph`'s
+  own comment warns against.
+
+### Verification evidence
+
+- 401 ms against 52 ms, six runs each, alternating, on one index.
+- `inspectIndexServeability`'s conjuncts are a strict subset of the full
+  report's, so healthy implies serveable. Asserted over the same fixture the
+  full inspection's spec uses, because two predicates about one index are the
+  shape that drifts.
+- An edited file and a newly added file are both serveable while the full report
+  calls them unhealthy — the behaviour change, as a test rather than a claim.
+- It fails closed: an unreadable index is reported unserveable with its reason.
