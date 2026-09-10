@@ -1,0 +1,158 @@
+{
+  "arm": "graph-recall",
+  "ranAt": "2026-09-10T21:22:34.845Z",
+  "commit": "d1ec4a5",
+  "dirtyWorkingTree": true,
+  "root": "C:\\Users\\BLUELABEL-PROGRAMMER\\Documents\\london\\London\\nestjs-ai-agent-lib",
+  "tree": {
+    "sourceFiles": 278,
+    "excludedByScope": 107,
+    "indexedSources": 171
+  },
+  "edges": {
+    "groundTruth": 627,
+    "inGraph": 450,
+    "recall": 0.7177033492822966,
+    "missingBecauseSourceExcludedByScope": 177,
+    "missingInsideAnIndexedFile": 0,
+    "externalSpecifiersIgnored": 351,
+    "unresolvableSpecifiers": 0
+  },
+  "byConstruct": [
+    {
+      "construct": "import",
+      "total": 539,
+      "found": 369,
+      "missingBecauseScope": 170,
+      "missingInsideIndexedFile": 0,
+      "examples": []
+    },
+    {
+      "construct": "export-star",
+      "total": 48,
+      "found": 48,
+      "missingBecauseScope": 0,
+      "missingInsideIndexedFile": 0,
+      "examples": []
+    },
+    {
+      "construct": "import-type",
+      "total": 29,
+      "found": 23,
+      "missingBecauseScope": 6,
+      "missingInsideIndexedFile": 0,
+      "examples": []
+    },
+    {
+      "construct": "export-named",
+      "total": 7,
+      "found": 7,
+      "missingBecauseScope": 0,
+      "missingInsideIndexedFile": 0,
+      "examples": []
+    },
+    {
+      "construct": "require",
+      "total": 4,
+      "found": 3,
+      "missingBecauseScope": 1,
+      "missingInsideIndexedFile": 0,
+      "examples": []
+    }
+  ],
+  "callConstructs": [
+    {
+      "construct": "dynamic-import",
+      "seen": 0,
+      "computedSpecifier": 0,
+      "relativeEdges": 0
+    },
+    {
+      "construct": "require",
+      "seen": 14,
+      "computedSpecifier": 0,
+      "relativeEdges": 4
+    }
+  ],
+  "inbound": {
+    "filesAsked": 165,
+    "complete": 52,
+    "partial": 113,
+    "worst": [
+      {
+        "target": "src/core/config/agent-directory.ts",
+        "expected": 26,
+        "reported": 19,
+        "missing": 7
+      },
+      {
+        "target": "src/core/agent/agent-kernel.ts",
+        "expected": 12,
+        "reported": 7,
+        "missing": 5
+      },
+      {
+        "target": "src/core/agent/delegation/delegation-registry.ts",
+        "expected": 10,
+        "reported": 5,
+        "missing": 5
+      },
+      {
+        "target": "src/core/agent/delegation/mandate.ts",
+        "expected": 9,
+        "reported": 4,
+        "missing": 5
+      },
+      {
+        "target": "src/core/config/runtime-root.ts",
+        "expected": 11,
+        "reported": 7,
+        "missing": 4
+      },
+      {
+        "target": "src/core/llm/provider.ts",
+        "expected": 14,
+        "reported": 11,
+        "missing": 3
+      },
+      {
+        "target": "src/core/rag/indexer.ts",
+        "expected": 10,
+        "reported": 7,
+        "missing": 3
+      },
+      {
+        "target": "src/core/types.ts",
+        "expected": 9,
+        "reported": 6,
+        "missing": 3
+      },
+      {
+        "target": "src/core/observability/console-sink.ts",
+        "expected": 10,
+        "reported": 7,
+        "missing": 3
+      },
+      {
+        "target": "src/core/config/model-switcher.ts",
+        "expected": 4,
+        "reported": 1,
+        "missing": 3
+      }
+    ]
+  },
+  "unmeasurable": [
+    {
+      "hole": "relative specifier resolving to a .tsx file",
+      "why": "resolveModulePath probes only the exact path, +.ts and +/index.ts, while discovery admits .tsx as source",
+      "status": "unmeasurable-here",
+      "detail": "this tree holds 0 .tsx files"
+    },
+    {
+      "hole": "tsconfig path alias",
+      "why": "extractDependencies keeps only specifiers starting with a dot",
+      "status": "unmeasurable-here",
+      "detail": "this repository declares no compilerOptions.paths and uses no alias specifiers"
+    }
+  ]
+}
