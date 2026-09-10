@@ -402,3 +402,79 @@ turning an interactive run into one permanent line per file.
 - `src/presentation/mcp/resource-catalog.ts` — `buildResourceCatalog`.
 - `src/core/config/workspace-scaffold.ts` — `ensureAgentStateIgnored`.
 - `README.md` — MCP and local workspace documentation.
+
+## Amendment — 2026-09-10 · The discovery scope is a decision; its consequence for the published graph tool is not recorded
+
+An external audit of the published 2.2.5 package reported the test-file exclusion
+as a defect. It is not: the rule is in this record's Decision, in
+*One read-only workspace discovery service*, and it is implemented as one shared
+predicate, `isIndexableSource` in `src/core/config/workspace-discovery.ts`.
+
+What the audit found that this record genuinely does not carry is the
+**consequence**. No row of `## Trade-offs` weighs including or excluding test
+files, and no item under `### Negative` names what follows for a tool this
+project has since published.
+
+### What follows, and why a consumer needs it stated
+
+A `.spec.ts` file is never enumerated, so it is never chunked, so it never
+becomes a `source` row in `dependency_graph`. `query_dependency_graph` with
+`direction: inbound` reads `WHERE target = ?`. Spec importers are therefore
+**structurally absent** rather than filtered at query time — the tool is not
+hiding them, it never knew about them.
+
+The tool answers *what breaks if I change this*. Tests are the first thing that
+breaks. So the answer comes back tidy, short, and quietly incomplete, which for a
+refactor is worse than a slow answer. Verified twice against `grep` on a consumer
+repository during the audit, both times finding a spec importer the tool omitted.
+
+The precedent for the fix is already in this project: ADR-031's `query_nest_graph`
+evaluation named the thirteen wiring shapes the tool can go blind to and declared
+two as limitations rather than pretending to cover them. The same treatment is
+owed here.
+
+### Three adjacent gaps in the same predicate, none of them decisions
+
+- **`__tests__` is not in `IGNORED_DIRECTORIES`.** A file at `__tests__/helper.ts`
+  carries no `.spec`/`.test` suffix, so it is indexed and does receive graph
+  edges. The scope rule and its implementation disagree for that layout.
+- **The suffix pattern anchors on `.ts` only.** `foo.spec.tsx` and `foo.test.tsx`
+  clear the extension gate and are indexed in full, while `foo.spec.ts` is
+  dropped. Whichever behaviour is intended, both cannot be.
+- **`resolveModulePath` never probes `.tsx`.** It tries the exact path, the path
+  plus `.ts`, and the path plus `/index.ts`. Discovery admits `.tsx` as
+  indexable source, so in any TSX repository an `import './Component'` that
+  resolves to `Component.tsx` produces **zero edges** and the importer vanishes
+  from the graph entirely. For a Next.js consumer this hole is larger than the
+  test one.
+
+### Four import forms the graph does not capture at all
+
+`extractDependencies` in `src/core/tools/ast/chunker.ts` keeps only specifiers
+that start with `.`, and visits only `ImportDeclaration` nodes. So tsconfig path
+aliases (`@/…`), dynamic `import()`, `require()`, and re-exports
+(`export * from`, `export { x } from`) contribute no edges. `import type` is
+captured, being an ordinary import declaration.
+
+None of that is wrong as an implementation choice; all of it is invisible to a
+consumer reading the tool's output as an answer about their code.
+
+### What this amendment does and does not change
+
+It changes nothing in the Decision. The scope rule may well be right, and this
+record is not the place to relitigate it — the proposal to index test files is
+recorded as a candidate in `docs/deferred-work.md`, in the sharper form David
+proposed: index the sentences in `it(...)` rather than the test code.
+
+What it adds is the consequence, so the next reader of `query_dependency_graph`
+output knows what the tool cannot see before trusting it for a demolition.
+
+### Verification evidence
+
+- Tarball/`dist` equality established first: `dastbal-umbra-2.2.5.tgz` extracted
+  and compared tree-wide against the local `dist/` at a clean tree — zero
+  differing files. The audited binary and the source read here are the same code.
+- Spec-importer omission: observed twice on a consumer repository, both against
+  `grep` as the reference.
+- The three predicate gaps and the four uncaptured import forms are read from
+  source, not observed at runtime, and are labelled accordingly.

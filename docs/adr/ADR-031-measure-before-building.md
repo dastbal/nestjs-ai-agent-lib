@@ -601,3 +601,113 @@ swapping `nomic-embed-text` for something better would not move a number here.
 - The gate's floors were set from a single run. They should be revisited once a
   few runs establish the real variance, which is the same discipline the
   deferred-work entry asked for and this record has not yet earned.
+
+## Amendment — 2026-09-10 · A second external review, what the vectors buy, and the ceiling this gate does not have
+
+### Twice is a pattern about the path, not about the reviewers
+
+This record's context notes that *two of three external review findings did not
+hold against the code*. It happened again, at the same ratio: an audit of the
+published 2.2.5 package produced three findings, and two were decisions already
+recorded and measured — the unknown-term abstention (ADR-028's amendment, with
+its trade priced) and the test-file exclusion (ADR-030's discovery scope).
+
+The common cause is worth naming, because it is fixable and it is not the
+reviewers' diligence. Both reviews read the **code** first and reached the
+**records** afterwards, and the code cannot state why it is the way it is. This
+project publishes the tool that makes the cheap order possible — `list_adrs`,
+which ADR-004 exists to provide precisely so decision history is consulted
+without reading every record. The second audit used it against a consumer
+repository and never pointed it at this one.
+
+So the finding is procedural: an audit of Umbra should open
+`docs/adr/README.md` and match its `Tags` column before it opens `src/`. The
+index says so in its own first paragraph. Recorded here rather than in a skill,
+because the next review may not run through a skill.
+
+What survived the second review was better than what it claimed, and is recorded
+in `docs/reports/2026-09-10-retrieval-cost-and-latency.md`.
+
+### Phase 1's artifact answered a question phase 1 never posed
+
+The corpus, the metrics under test and the committed report series were built to
+tell whether a retrieval change helped. They turned out to answer something
+larger for free: **what the embedding apparatus buys.** The audit had proposed
+removing it, and until this run nothing in the repository could price it.
+
+`scripts/bench-fts-only.mjs` scores the same corpus with the semantic branch
+removed. Calibration at `e72d7a8`, 169 files, 1,022 chunks, both arms under a
+100% reachable ceiling with 10 of 10 negatives provable:
+
+| Arm | hit@4 | mrr |
+| --- | --- | --- |
+| hybrid | 0.867 | 0.683 |
+| fts-only | 0.667 | 0.585 |
+
+Twenty points. The shape matters more than the size: of the nine positives only
+the vectors rescue, **eight were answered by the lexical arm** — it returned
+files, confidently, and they were wrong. The vectors are not buying recall, they
+are buying the difference between a confident wrong answer and a right one. And
+in 45 positives there was no case where fusion displaced a correct lexical hit.
+
+Two arms are reported because removing the vectors changes two things at once:
+with no semantic ranking the `hybrid` evidence class is unreachable, so
+`hasGroundedEvidence` can only ground on `lexicalExact` and abstention tightens by
+omission. That side effect is 2.2 points of the 20; the other 17.8 are ranking.
+Reporting only the shipped policy would have credited the vectors for an artefact
+of the abstention rule — the same conflation this record was written about.
+
+**The embedding apparatus is justified by evidence and stays.** The proposal to
+remove it is closed, and so are two candidates that were waiting on this number.
+
+### The scan was never the latency lever
+
+ADR-026 records the remaining linear scan as an accepted negative, and
+`docs/deferred-work.md` holds `vec0` indexed KNN against a real measurement.
+That measurement now exists, and it points somewhere else. Timed in isolation
+against the same index:
+
+| Stage | Median |
+| --- | --- |
+| the readiness gate, `inspectIndexIntegrity` | 202.4 ms |
+| the query embedding, warm | 87.2 ms |
+| FTS, vector ranking and fusion — the search | 2.2–5.6 ms |
+
+The three sum to ~295 ms against a 293.6 ms observed median, so they account for
+the whole round trip. The search is about one percent of it. `readReadiness`
+calls `inspectIndexIntegrity` on **every** `ask_codebase` call, which opens a
+second SQLite connection, re-runs workspace discovery and md5-hashes every
+discovered source file — to re-derive what `.umbra/index.identity.json` already
+records. The graph tools do not pass through that gate, which is the entire
+explanation for the latency gap the audit observed between them and
+`ask_codebase` and attributed to the embedding call.
+
+Consequence for the roadmap: making the readiness gate cheap is worth more than
+indexed KNN by a wide margin, and neither is worth anything until it is measured
+on a repository large enough for the scan to matter.
+
+### The gate has floors and no ceiling
+
+`retrieval-gate.spec.ts` asserts a hit floor, a false-abstention cap and a
+correct-abstention floor. Nothing asserts anything about the **size** of an
+answer, and nothing anywhere does: there is no max-tokens, max-files or
+truncation bound on any MCP tool response. `read_file` has
+`DEFAULT_MAX_READ_TOKENS` at 6,000 with an env override; `ask_codebase` has
+nothing, and its output is whatever four files' skeletons and chunk bodies happen
+to be.
+
+That is why the skeleton block growing was something an audit found rather than
+something the build reported. The follow-up metric is response cost, and by this
+record's own rule it belongs beside `retrieval-metrics.ts` under test rather than
+in a script, so it cannot drift silently. A ceiling calibrated against one
+repository would repeat the mistake ADR-028 named, so it needs at least two.
+
+### Still not verified
+
+- No single real request was traced end to end; the latency split is three
+  isolated measurements that happen to sum to the observed median.
+- The consumer-repository figures quoted in the report — the bimodal token
+  distribution, the 65% peak skeleton share, the 13–16 s boot, the sub-250 ms
+  readiness race — come from audit sessions whose raw captures did not survive.
+  They are prior observations, not reproducible measurements. The committed
+  harness is what makes the next round reproducible.
