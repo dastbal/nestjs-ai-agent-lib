@@ -1,0 +1,657 @@
+{
+  "arm": "fts-only",
+  "corpusVersion": 5,
+  "split": "calibration",
+  "ranAt": "2026-09-10T15:30:01.021Z",
+  "commit": "d6f5991",
+  "dirtyWorkingTree": false,
+  "root": "C:\\Users\\BLUELABEL-PROGRAMMER\\Documents\\london\\London\\nestjs-ai-agent-lib",
+  "latencyExcludes": [
+    "mcp transport",
+    "readiness gate",
+    "query embedding"
+  ],
+  "indexSize": {
+    "files": 170,
+    "chunks": 1029
+  },
+  "coverage": {
+    "expectedPaths": 43,
+    "coveredPaths": 43,
+    "missingPaths": [],
+    "unreachableCases": [],
+    "reachableHitCeiling": 1
+  },
+  "summaries": {
+    "policy": [
+      {
+        "split": "calibration",
+        "positives": 45,
+        "negatives": 10,
+        "hitRate": 0.6444444444444445,
+        "mrr": 0.5740740740740741,
+        "falseAbstentionRate": 0.06666666666666667,
+        "correctAbstentionRate": 1,
+        "medianLatencyMs": 3.4135,
+        "p95LatencyMs": 9.3975
+      },
+      {
+        "split": "all",
+        "positives": 45,
+        "negatives": 10,
+        "hitRate": 0.6444444444444445,
+        "mrr": 0.5740740740740741,
+        "falseAbstentionRate": 0.06666666666666667,
+        "correctAbstentionRate": 1,
+        "medianLatencyMs": 3.4135,
+        "p95LatencyMs": 9.3975
+      }
+    ],
+    "ranking": [
+      {
+        "split": "calibration",
+        "positives": 45,
+        "negatives": 10,
+        "hitRate": 0.6888888888888889,
+        "mrr": 0.6074074074074074,
+        "falseAbstentionRate": 0.022222222222222223,
+        "correctAbstentionRate": 1,
+        "medianLatencyMs": 3.4135,
+        "p95LatencyMs": 9.3975
+      },
+      {
+        "split": "all",
+        "positives": 45,
+        "negatives": 10,
+        "hitRate": 0.6888888888888889,
+        "mrr": 0.6074074074074074,
+        "falseAbstentionRate": 0.022222222222222223,
+        "correctAbstentionRate": 1,
+        "medianLatencyMs": 3.4135,
+        "p95LatencyMs": 9.3975
+      }
+    ]
+  },
+  "trace": [
+    {
+      "id": "provider-resolution",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/rag/embeddings/embeddings-resolver.ts"
+      ],
+      "returnedPaths": [
+        "src/bin/cli.ts",
+        "src/core/rag/retriever.ts",
+        "src/core/rag/embeddings/embeddings.port.ts"
+      ]
+    },
+    {
+      "id": "embedding-default",
+      "reason": "ungrounded",
+      "expectedPaths": [
+        "src/core/rag/embeddings/embeddings-resolver.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/embeddings/embeddings-resolver.ts",
+        "src/presentation/cli/model-menu.ts",
+        "src/bin/cli.ts"
+      ]
+    },
+    {
+      "id": "embedding-config",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/config/agent-config.ts"
+      ],
+      "returnedPaths": [
+        "src/core/llm/provider.ts",
+        "src/core/config/agent-config.ts",
+        "src/core/config/agent-config-writer.ts"
+      ]
+    },
+    {
+      "id": "embedding-identity",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/rag/embeddings/embeddings.port.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/unknown-terms.ts",
+        "src/core/agent/domain/agent.entity.ts",
+        "src/bin/cli.ts",
+        "src/core/rag/retriever.ts"
+      ]
+    },
+    {
+      "id": "embedding-availability",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/rag/embeddings/embeddings-availability.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/embeddings/embeddings-resolver.ts",
+        "src/core/rag/embedding-input.ts",
+        "src/core/rag/embeddings/ollama-embeddings.adapter.ts"
+      ]
+    },
+    {
+      "id": "ollama-embedding-adapter",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/rag/embeddings/ollama-embeddings.adapter.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/embeddings/ollama-embeddings.adapter.ts",
+        "src/core/rag/embeddings/embeddings-resolver.ts",
+        "src/core/llm/provider.ts"
+      ]
+    },
+    {
+      "id": "vertex-embedding-adapter",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/rag/embeddings/vertex-embeddings.adapter.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/embeddings/embeddings-resolver.ts",
+        "src/core/rag/embeddings/vertex-embeddings.adapter.ts",
+        "src/core/rag/embeddings/ollama-embeddings.adapter.ts"
+      ]
+    },
+    {
+      "id": "provider-backfill",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/rag/indexer.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/indexer.ts",
+        "src/core/rag/retriever.ts",
+        "src/core/rag/embedding-input.ts"
+      ]
+    },
+    {
+      "id": "index-stamp",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/rag/index-stamp.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/index-stamp.ts",
+        "src/presentation/mcp/resource-catalog.ts"
+      ]
+    },
+    {
+      "id": "semantic-retriever",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/rag/retriever.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/hybrid-ranking.ts",
+        "src/core/rag/retrieval-metrics.ts"
+      ]
+    },
+    {
+      "id": "lexical-index",
+      "reason": "unknown-term:synchronized",
+      "expectedPaths": [
+        "src/core/rag/lexical-index.ts"
+      ],
+      "returnedPaths": []
+    },
+    {
+      "id": "hybrid-ranking",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/rag/hybrid-ranking.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/hybrid-ranking.ts",
+        "src/core/rag/lexical-index.ts",
+        "src/core/rag/retriever.ts"
+      ]
+    },
+    {
+      "id": "abstention-report",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/rag/retriever.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/unknown-terms.ts",
+        "src/core/rag/hybrid-ranking.ts",
+        "src/core/rag/lexical-index.ts",
+        "src/core/agent/deep-agent-factory.ts"
+      ]
+    },
+    {
+      "id": "vector-codec",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/rag/vector-codec.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/vector-codec.ts",
+        "src/core/rag/retriever.ts"
+      ]
+    },
+    {
+      "id": "vector-storage",
+      "reason": "ungrounded",
+      "expectedPaths": [
+        "src/core/state/db.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/index-integrity.ts",
+        "src/core/state/db.ts",
+        "src/core/rag/lexical-index.ts"
+      ]
+    },
+    {
+      "id": "sqlite-vector-extension",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/state/vector-extension.ts"
+      ],
+      "returnedPaths": [
+        "src/core/state/vector-extension.ts",
+        "src/core/rag/retriever.ts"
+      ]
+    },
+    {
+      "id": "file-registry",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/state/file-registry.ts"
+      ],
+      "returnedPaths": [
+        "src/core/state/db.ts",
+        "src/core/rag/indexer.ts",
+        "src/presentation/cli/provider-diagnostics.ts"
+      ]
+    },
+    {
+      "id": "chunker",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/tools/ast/chunker.ts"
+      ],
+      "returnedPaths": [
+        "src/core/tools/ast/chunker.ts",
+        "src/core/types.ts"
+      ]
+    },
+    {
+      "id": "cosine-math",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/rag/math.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/retriever.ts"
+      ]
+    },
+    {
+      "id": "rag-tool",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/tools/rag-tools.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/embeddings/ollama-embeddings.adapter.ts",
+        "src/presentation/mcp/tool-catalog.ts"
+      ]
+    },
+    {
+      "id": "mcp-provider-pin",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/presentation/mcp/start-mcp-server.ts"
+      ],
+      "returnedPaths": [
+        "src/presentation/mcp/start-mcp-server.ts",
+        "src/core/rag/embeddings/embeddings-resolver.ts"
+      ]
+    },
+    {
+      "id": "mcp-tool-catalog",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/presentation/mcp/tool-catalog.ts"
+      ],
+      "returnedPaths": [
+        "src/presentation/mcp/tool-catalog.ts",
+        "src/presentation/mcp/sdk-server.ts"
+      ]
+    },
+    {
+      "id": "mcp-dto",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/presentation/mcp/dto-mapper.ts"
+      ],
+      "returnedPaths": [
+        "src/presentation/mcp/dto-mapper.ts",
+        "src/presentation/mcp/tool-catalog.ts"
+      ]
+    },
+    {
+      "id": "mcp-sdk-server",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/presentation/mcp/sdk-server.ts"
+      ],
+      "returnedPaths": [
+        "src/presentation/mcp/sdk-loader.ts",
+        "src/presentation/mcp/sdk-server.ts",
+        "src/presentation/mcp/index.ts"
+      ]
+    },
+    {
+      "id": "mcp-sdk-loader",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/presentation/mcp/sdk-loader.ts"
+      ],
+      "returnedPaths": [
+        "src/presentation/mcp/sdk-server.ts",
+        "src/presentation/mcp/sdk-loader.ts"
+      ]
+    },
+    {
+      "id": "mcp-contracts",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/presentation/mcp/mcp.contracts.ts"
+      ],
+      "returnedPaths": [
+        "src/presentation/mcp/mcp.contracts.ts",
+        "src/presentation/mcp/tool-catalog.ts"
+      ]
+    },
+    {
+      "id": "mcp-prompts",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/presentation/mcp/prompt-catalog.ts"
+      ],
+      "returnedPaths": [
+        "src/presentation/mcp/prompt-catalog.ts",
+        "src/presentation/mcp/tool-catalog.ts",
+        "src/core/config/workspace-scaffold.ts"
+      ]
+    },
+    {
+      "id": "mcp-resources",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/presentation/mcp/resource-catalog.ts"
+      ],
+      "returnedPaths": [
+        "src/presentation/mcp/resource-catalog.ts",
+        "src/presentation/mcp/sdk-server.ts",
+        "src/presentation/mcp/mcp.contracts.ts",
+        "src/presentation/mcp/start-mcp-server.ts"
+      ]
+    },
+    {
+      "id": "runtime-root",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/config/runtime-root.ts"
+      ],
+      "returnedPaths": [
+        "src/presentation/mcp/resource-catalog.ts",
+        "src/core/config/runtime-root.ts",
+        "src/presentation/mcp/project-root.ts"
+      ]
+    },
+    {
+      "id": "agent-directory",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/config/agent-directory.ts"
+      ],
+      "returnedPaths": [
+        "src/core/config/agent-directory.ts",
+        "src/core/agent/deep-agent-factory.ts",
+        "src/core/agent/budget-probe.ts"
+      ]
+    },
+    {
+      "id": "workspace-scaffold",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/config/workspace-scaffold.ts"
+      ],
+      "returnedPaths": [
+        "src/core/config/workspace-scaffold.ts"
+      ]
+    },
+    {
+      "id": "mcp-config",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/config/mcp-config.ts"
+      ],
+      "returnedPaths": [
+        "src/core/config/mcp-config.ts",
+        "src/presentation/mcp/tool-catalog.ts",
+        "src/presentation/mcp/prompt-catalog.ts",
+        "src/presentation/mcp/dto-mapper.ts"
+      ]
+    },
+    {
+      "id": "agent-kernel",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/agent/agent-kernel.ts"
+      ],
+      "returnedPaths": [
+        "src/core/agent/agent-kernel.ts"
+      ]
+    },
+    {
+      "id": "evidence-protocol",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/agent/evidence-protocol.ts"
+      ],
+      "returnedPaths": [
+        "src/core/agent/evidence-protocol.ts",
+        "src/core/agent/deep-agent-factory.ts"
+      ]
+    },
+    {
+      "id": "context-compression",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/agent/context-compressor.ts"
+      ],
+      "returnedPaths": [
+        "src/core/agent/context-compressor.ts",
+        "src/core/agent/context-fit.ts"
+      ]
+    },
+    {
+      "id": "turn-budget",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/agent/turn-governor.ts"
+      ],
+      "returnedPaths": [
+        "src/core/agent/turn-governor.ts",
+        "src/core/agent/iteration-budget.middleware.ts"
+      ]
+    },
+    {
+      "id": "security-policy",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/security/agent-security-policy.ts"
+      ],
+      "returnedPaths": [
+        "src/core/tools/utils/authorize.ts",
+        "src/core/agent/deep-agent-factory.ts",
+        "src/presentation/mcp/dto-mapper.ts"
+      ]
+    },
+    {
+      "id": "pricing",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/infrastructure/config/default-pricing.ts"
+      ],
+      "returnedPaths": [
+        "src/presentation/cli/chat-session.ts",
+        "src/core/rag/unknown-terms.ts",
+        "src/core/config/model-switcher.ts"
+      ]
+    },
+    {
+      "id": "ollama-chat",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/llm/ollama-adapter.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/embeddings/ollama-embeddings.adapter.ts",
+        "src/core/llm/provider.ts",
+        "src/core/llm/vertex-chat-adapter.ts"
+      ]
+    },
+    {
+      "id": "vertex-provider",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/llm/provider.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/embeddings/ollama-embeddings.adapter.ts",
+        "src/presentation/cli/model-menu.ts",
+        "src/core/rag/embeddings/embeddings-resolver.ts"
+      ]
+    },
+    {
+      "id": "console-sink",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/observability/console-sink.ts"
+      ],
+      "returnedPaths": [
+        "src/presentation/mcp/resource-catalog.ts",
+        "src/core/tools/utils/logger.ts",
+        "src/core/observability/console-sink.ts"
+      ]
+    },
+    {
+      "id": "chunk-types",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/types.ts"
+      ],
+      "returnedPaths": [
+        "src/core/rag/retriever.ts",
+        "src/core/rag/unknown-terms.ts",
+        "src/core/rag/tsdoc-enrichment.ts",
+        "src/core/agent/domain/agent.entity.ts"
+      ]
+    },
+    {
+      "id": "dependency-tool",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/tools/analysis-tools.ts"
+      ],
+      "returnedPaths": [
+        "src/core/tools/analysis-tools.ts",
+        "src/presentation/mcp/tool-catalog.ts"
+      ]
+    },
+    {
+      "id": "integrity-tool",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/tools/testing-tools.ts"
+      ],
+      "returnedPaths": [
+        "src/core/tools/testing-tools.ts",
+        "src/core/subagents/coder.subagent.ts",
+        "src/presentation/mcp/tool-catalog.ts"
+      ]
+    },
+    {
+      "id": "adr-index-tool",
+      "reason": "answered",
+      "expectedPaths": [
+        "src/core/tools/adr-index.ts"
+      ],
+      "returnedPaths": [
+        "src/core/tools/adr-index.ts",
+        "src/core/agent/session-overhead.ts",
+        "src/presentation/mcp/prompt-catalog.ts"
+      ]
+    },
+    {
+      "id": "negative-prometheus",
+      "reason": "unknown-term:prometheus",
+      "expectedPaths": [],
+      "returnedPaths": []
+    },
+    {
+      "id": "negative-graphql",
+      "reason": "unknown-term:graphql",
+      "expectedPaths": [],
+      "returnedPaths": []
+    },
+    {
+      "id": "negative-marketplace",
+      "reason": "unknown-term:plugin,marketplace",
+      "expectedPaths": [],
+      "returnedPaths": []
+    },
+    {
+      "id": "negative-multitenant",
+      "reason": "unknown-term:tenant",
+      "expectedPaths": [],
+      "returnedPaths": []
+    },
+    {
+      "id": "negative-rebase",
+      "reason": "unknown-term:rebase",
+      "expectedPaths": [],
+      "returnedPaths": []
+    },
+    {
+      "id": "negative-transcription",
+      "reason": "unknown-term:voice,transcription,audio",
+      "expectedPaths": [],
+      "returnedPaths": []
+    },
+    {
+      "id": "negative-mongodb",
+      "reason": "unknown-term:mongodb",
+      "expectedPaths": [],
+      "returnedPaths": []
+    },
+    {
+      "id": "negative-kafka",
+      "reason": "unknown-term:topic",
+      "expectedPaths": [],
+      "returnedPaths": []
+    },
+    {
+      "id": "negative-grafana",
+      "reason": "unknown-term:grafana,dashboard",
+      "expectedPaths": [],
+      "returnedPaths": []
+    },
+    {
+      "id": "negative-terraform",
+      "reason": "unknown-term:terraform,provision",
+      "expectedPaths": [],
+      "returnedPaths": []
+    }
+  ]
+}
