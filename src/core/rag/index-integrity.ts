@@ -191,6 +191,159 @@ export function inspectIndexIntegrity(
 }
 
 /** Renders the stable operator-facing form shared by doctor and MCP resources. */
+/** Whether the stored index can answer a search, and why not when it cannot. */
+export interface IndexServeability {
+  readonly serveable: boolean;
+  readonly reason?: string;
+}
+
+/**
+ * Asks whether the index can answer a search, without touching the filesystem.
+ *
+ * ## Why this exists beside `inspectIndexIntegrity`
+ *
+ * The readiness gate ran the full inspection on **every** `ask_codebase` call.
+ * Measured on a 169-file repository: 202 ms median over six runs, against a
+ * 293.6 ms round trip whose actual search is 2 to 5 ms. Of the eleven conjuncts
+ * the full report combines, exactly two are expensive, and both exist to notice
+ * a change the database cannot see — `discoverSources()` walks the tree and
+ * parses tsconfig, and the staleness check md5-hashes every discovered file.
+ *
+ * ## The distinction that makes dropping them correct rather than merely cheap
+ *
+ * Those two answer *is the index current?* The gate needs *can the index
+ * answer?*, and they are different questions with different remedies. Chunks
+ * that exist with no vector for the active identity would rank wrongly, so that
+ * must refuse. A file edited since the last run means one answer may be
+ * slightly out of date — which is what an index always is between runs, and
+ * which used to make `ask_codebase` refuse **entirely**, in the middle of a
+ * refactor, at exactly the moment somebody asks.
+ *
+ * Serving it is the better answer, and it is only honest because the answer
+ * already says when the index was built: `withProvenance` carries `indexedAt`,
+ * `filesIndexed` and `status` on every reply, so a caller can judge the age
+ * itself rather than being told nothing.
+ *
+ * Completeness did not stop being checked. It moved to where it is asked for —
+ * `get_index_status`, `umbra doctor --index`, and the boot-time coverage check —
+ * all of which still run the full inspection.
+ *
+ * ## The invariant
+ *
+ * Its conjuncts are a strict subset of `inspectIndexIntegrity`'s, so a healthy
+ * index is always serveable. That relationship is asserted in the spec, because
+ * two predicates about one index are exactly the shape that drifts.
+ *
+ * @param rootDir - Root owning the `.umbra` workspace.
+ * @param selectedIdentity - Provider/model whose vector coverage must be complete.
+ * @returns Whether a search may proceed, with the reason when it may not.
+ */
+export function inspectIndexServeability(
+  rootDir: string,
+  selectedIdentity?: Pick<EmbeddingsIdentity, 'provider' | 'model'>,
+): IndexServeability {
+  const resolvedRoot = path.resolve(rootDir);
+  const databasePath = agentPath(resolvedRoot, 'memory.db');
+  if (!fs.existsSync(databasePath)) {
+    return { serveable: false, reason: 'No .umbra/memory.db exists for this root.' };
+  }
+
+  const stamp = readIndexStamp(resolvedRoot);
+  if (stamp === undefined) {
+    return { serveable: false, reason: 'No durable index stamp exists yet.' };
+  }
+  // The free half of the full report's stamp check. Comparing the discovered
+  // and covered counts needs the tree walk and is therefore deliberately not
+  // done here; reading the status is a field lookup.
+  if (stamp.status !== 'complete') {
+    return { serveable: false, reason: `The index stamp reports \`${stamp.status}\` coverage.` };
+  }
+
+  let db: Database.Database | undefined;
+  try {
+    db = new Database(databasePath, { readonly: true, fileMustExist: true });
+
+    const tables = new Set(
+      (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[])
+        .map((row) => row.name),
+    );
+    if (!REQUIRED_TABLES.every((table) => tables.has(table))) {
+      return {
+        serveable: false,
+        reason: 'The index schema is missing required tables. Run `umbra index` to migrate it.',
+      };
+    }
+
+    const lease = inspectIndexLease(db);
+    if (lease.active) {
+      return { serveable: false, reason: 'Another Umbra process holds this root index lease.' };
+    }
+
+    if (count(db, 'SELECT COUNT(*) AS total FROM file_registry') === 0) {
+      return { serveable: false, reason: 'The file registry is empty.' };
+    }
+    if (count(db, 'SELECT COUNT(*) AS total FROM code_chunks') === 0) {
+      return { serveable: false, reason: 'No code chunks are stored.' };
+    }
+
+    const missingWhere = selectedIdentity === undefined
+      ? 'NOT EXISTS (SELECT 1 FROM chunk_vectors v WHERE v.chunk_id = c.id)'
+      : 'NOT EXISTS (SELECT 1 FROM chunk_vectors v WHERE v.chunk_id = c.id AND v.provider = ? AND v.model = ?)';
+    const parameters = selectedIdentity === undefined
+      ? []
+      : [selectedIdentity.provider, selectedIdentity.model];
+    const missingVectors = count(
+      db,
+      `SELECT COUNT(*) AS total FROM code_chunks c WHERE ${missingWhere}`,
+      parameters,
+    );
+    if (missingVectors > 0) {
+      // The one that must refuse. A chunk with no vector for the active
+      // identity cannot be ranked, so the result set would be wrong rather
+      // than merely dated.
+      return {
+        serveable: false,
+        reason: `${missingVectors} chunk(s) have no vector for the active provider.`,
+      };
+    }
+
+    const chunkless = paths(
+      db,
+      `SELECT f.path AS path FROM file_registry f
+       WHERE f.index_state = 'indexed'
+         AND NOT EXISTS (SELECT 1 FROM code_chunks c WHERE c.file_path = f.path)
+       ORDER BY f.path LIMIT 1`,
+    );
+    if (chunkless.length > 0) {
+      return {
+        serveable: false,
+        reason: `A file is recorded as indexed but holds no chunks: ${chunkless[0]}.`,
+      };
+    }
+
+    const vectors = db.prepare(
+      `SELECT provider, model, dimensions, COUNT(*) AS vectors
+         FROM chunk_vectors GROUP BY provider, model, dimensions ORDER BY provider, model, dimensions`,
+    ).all() as VectorIdentityCoverage[];
+    const conflicts = conflictingDimensions(vectors);
+    if (conflicts.length > 0) {
+      return {
+        serveable: false,
+        reason: `Stored vectors disagree about dimensions for ${conflicts.join(', ')}.`,
+      };
+    }
+
+    return { serveable: true };
+  } catch (error: unknown) {
+    // Reported rather than swallowed, and it fails closed: an index this cannot
+    // read is one a search must not be told is usable.
+    const message = error instanceof Error ? error.message : String(error);
+    return { serveable: false, reason: `The index could not be read: ${message}` };
+  } finally {
+    db?.close();
+  }
+}
+
 export function formatIndexIntegrity(report: IndexIntegrityReport): string {
   const lines = [
     `database:       ${report.databasePath}`,

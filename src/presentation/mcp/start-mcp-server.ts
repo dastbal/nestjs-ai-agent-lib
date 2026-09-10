@@ -6,7 +6,11 @@ import { setLogSink } from '../../core/observability/console-sink';
 type AvailabilityModule = typeof import('../../core/rag/embeddings/embeddings-availability');
 type ResolverModule = typeof import('../../core/rag/embeddings/embeddings-resolver');
 type IndexerModule = typeof import('../../core/rag/indexer');
-import { formatIndexIntegrity, inspectIndexIntegrity } from '../../core/rag/index-integrity';
+import {
+  formatIndexIntegrity,
+  inspectIndexIntegrity,
+  inspectIndexServeability,
+} from '../../core/rag/index-integrity';
 import { readIndexStamp } from '../../core/rag/index-stamp';
 // (the indexer's implementation is loaded lazily; see loadIndexingModules)
 import { withProvenance } from './dto-mapper';
@@ -326,10 +330,28 @@ function semanticSearchReadiness(
 
   const stamp = readIndexStamp(rootDir);
   if (stamp === undefined) return { ready: false, message: 'No durable index stamp exists yet.' };
-  const integrity = inspectIndexIntegrity(rootDir, { provider: stamp.provider, model: stamp.model });
-  return integrity.healthy
+
+  // Serveability, not integrity. This runs on every `ask_codebase` call, and the
+  // full inspection cost 202 ms of a 293 ms round trip to re-derive facts about
+  // the filesystem — while the search itself is 2 to 5 ms. The two conjuncts it
+  // drops answer *is the index current?*; this gate needs *can the index
+  // answer?*. A file edited since the last run used to refuse the question
+  // outright, in the middle of a refactor; it now answers, and the reply already
+  // carries `indexedAt` so the caller can judge the age. Completeness is still
+  // checked wherever it is asked for — `get_index_status`, `umbra doctor
+  // --index`, and the boot-time coverage check below all run the full report.
+  const serveability = inspectIndexServeability(rootDir, {
+    provider: stamp.provider,
+    model: stamp.model,
+  });
+  return serveability.serveable
     ? { ready: true, message: lifecycle.message }
-    : { ready: false, message: 'The vector coverage check is incomplete. Run umbra doctor --index.' };
+    : {
+      ready: false,
+      message:
+        `${serveability.reason ?? 'The index cannot serve a search.'} ` +
+        'Read get_index_status, or run umbra doctor --index.',
+    };
 }
 
 /** Tests persisted coverage without invoking an embedding provider. */
