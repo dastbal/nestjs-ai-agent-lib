@@ -20,6 +20,7 @@ import {
   hasGroundedEvidence,
   RetrievalEvidence,
 } from './hybrid-ranking';
+import { renderSkeletonForContext } from './skeleton-render';
 import {
   PendingRetrievalAlias,
   RetrievalMemoryService,
@@ -67,7 +68,10 @@ interface FileContext {
   evidence: RetrievalEvidence;
   chunks: ProcessedChunk[];
   imports: string[];
-  skeleton?: string; // <--- ADDED
+  // `null`, not just absent: the registry holds rows whose skeleton column is
+  // SQLite NULL, and `getFileSkeleton` passes that through. Declared as `string`
+  // alone, it read as a lie the old truthiness check happened to survive.
+  skeleton?: string | null; // <--- ADDED
 }
 
 /**
@@ -451,7 +455,7 @@ export class RetrieverService {
   /**
    * Retrieves the 'Skeleton' (Signatures) for a file from the registry.
    */
-  private getFileSkeleton(sourcePath: string): string | undefined {
+  private getFileSkeleton(sourcePath: string): string | null | undefined {
     const normalizedPath = sourcePath.split(path.sep).join('/');
     try {
       const stmt = this.db.prepare(
@@ -621,8 +625,13 @@ export class RetrieverService {
           output += `   - (...and ${fileCtx.imports.length - 5} more)\n`;
       }
 
-      if (fileCtx.skeleton) {
-        output += `🏗️ **FILE SKELETON (MAP):**\n${fileCtx.skeleton}\n\n`;
+      // Rendered rather than interpolated raw: the column holds JSON, and
+      // handing the model the stored envelope cost 43% of this block's tokens
+      // for no information. See `skeleton-render.ts` for what is dropped and why
+      // — the named bindings it omits are already in the snippet below.
+      const skeleton = renderSkeletonForContext(fileCtx.skeleton);
+      if (skeleton !== undefined) {
+        output += `🏗️ **FILE SKELETON (MAP):**\n${skeleton}\n\n`;
       }
 
       output += `📝 **CODE SNIPPETS:**\n`;
