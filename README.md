@@ -740,6 +740,16 @@ unpublished release candidate is not installed by that command. `npx -y
 initializing a project, but it is not the global MCP launcher. No install hook
 or postinstall writes client configuration.
 
+**Why `npx` is not the launcher, measured.** `-y` answers the install prompt; it
+does not skip the registry lookup, so every launch depends on the network.
+Timing spawn to the MCP `initialize` response — the window a client's connect
+timeout measures — `npx` ran between 11.7 s and 24 s and, in one run of six,
+never answered inside 60 s. The installed binary was consistently around 12 s on
+the same build, and 4.4 s once the indexer stopped loading before the handshake.
+A client with a 30-second timeout therefore fails *intermittently* through
+`npx`, which is harder to diagnose than failing every time. See ADR-024
+amendment 15.
+
 Run the flow again at any time:
 
 ```bash
