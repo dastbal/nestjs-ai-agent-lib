@@ -12,8 +12,14 @@ import { GraphEdge } from '../types';
  * measured at 0 of 48 on this repository — so a barrel file had no outbound
  * dependencies and `query_dependency_graph` answered "what breaks if I change
  * this" without naming the published entry point that re-exports it.
+ *
+ * `v3` added relative `require()` and `import()` calls. They were skipped at
+ * first as unmeasurable — this tree held one, in a spec — and stopped being
+ * unmeasurable the moment `start-mcp-server.ts` began loading the indexer
+ * lazily. The graph arm reported the three new gaps on the next run, which is
+ * what a per-construct recall report is for.
  */
-const EXTRACTOR_GENERATION_KEY = 'dependency-graph-extractor-v2';
+const EXTRACTOR_GENERATION_KEY = 'dependency-graph-extractor-v3';
 
 /** One discovered source file, as `WorkspaceDiscoveryService` reports it. */
 export interface BackfillCandidate {

@@ -106,6 +106,39 @@ describe('NestChunker dependency edges', () => {
     expect(edgesFor("export * from './absent';")).toEqual([]);
   });
 
+  // Added after the graph arm reported three gaps caused by a lazy-load fix in
+  // `start-mcp-server.ts`. A module loaded on purpose at runtime is the
+  // dependency a reader is least likely to find by eye.
+  it('records a relative require as its own relation', () => {
+    const edges = edgesFor("const mod = require('./imported');");
+
+    expect(edges).toEqual([
+      { sourcePath: 'src/barrel.ts', targetPath: 'src/imported.ts', relation: 'require' },
+    ]);
+  });
+
+  it('records a relative dynamic import as its own relation', () => {
+    const edges = edgesFor("const mod = await import('./imported');");
+
+    expect(edges).toEqual([
+      { sourcePath: 'src/barrel.ts', targetPath: 'src/imported.ts', relation: 'dynamic-import' },
+    ]);
+  });
+
+  it('ignores an external package reached by require', () => {
+    expect(edgesFor("const db = require('better-sqlite3');")).toEqual([]);
+  });
+
+  it('ignores a computed specifier, which has no static target to record', () => {
+    expect(edgesFor('const name = "./imported";\nconst mod = require(name);')).toEqual([]);
+  });
+
+  // `typeof import('x')` is a type position, not a call. The tree held two of
+  // these and a grep counted them as dynamic imports; they are not.
+  it('ignores an import type position, which is not a call at all', () => {
+    expect(edgesFor("type Fs = typeof import('./imported');")).toEqual([]);
+  });
+
   it('keeps both edges when a file imports and re-exports different targets', () => {
     const edges = edgesFor(
       ["import { marker } from './imported';", "export * from './re-exported';"].join('\n'),

@@ -330,6 +330,30 @@ export class NestChunker {
       link(exported.getModuleSpecifierValue(), 're-export');
     }
 
+    // `require('./x')` and `import('./x')` are call expressions, not
+    // declarations, so neither loop above reaches them. They were left out at
+    // first because this tree held exactly one relative `require`, in a spec —
+    // unmeasurable, and reported as such. That changed the moment
+    // `start-mcp-server.ts` began loading the indexer lazily to keep it off the
+    // handshake: three deliberate relative requires appeared in indexed source,
+    // and the graph arm reported three gaps in the next run.
+    //
+    // A lazily loaded module is not a lesser dependency. It is the one a reader
+    // is least likely to find by eye, which is the whole reason to record it.
+    for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      const callee = call.getExpression().getText();
+      if (callee !== 'require' && callee !== 'import') continue;
+
+      const [argument] = call.getArguments();
+      if (argument === undefined) continue;
+      // Read from the literal rather than the type system: a computed specifier
+      // has no static target, so no graph could carry it honestly.
+      const literal = /^['"](.+)['"]$/.exec(argument.getText());
+      if (literal === null) continue;
+
+      link(literal[1], callee === 'require' ? 'require' : 'dynamic-import');
+    }
+
     return edges;
   }
 
