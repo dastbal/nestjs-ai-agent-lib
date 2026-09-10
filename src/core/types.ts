@@ -1,11 +1,17 @@
 /**
  * Represents the type of relation between two files in the project.
  * - 'import': Standard ES6 import.
+ * - 're-export': `export * from` or `export { x } from` — a dependency that
+ *   passes the target's surface through instead of consuming it. Kept distinct
+ *   from 'import' because `query_dependency_graph` prints the relation, and a
+ *   caller asking what breaks when a module changes is helped by knowing the
+ *   edge runs through a barrel.
  * - 'extends': Class inheritance.
  * - 'implements': Interface implementation.
  */
 export type DependencyRelation =
   | 'import'
+  | 're-export'
   | 'extends'
   | 'implements'
   | 'injects';
