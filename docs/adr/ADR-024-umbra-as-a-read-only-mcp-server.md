@@ -927,3 +927,60 @@ would make a global installation fail before its first response.
 - `src/bin/cli.ts` — accurate global MCP wording during manual initialization.
 - `README.md` and `src/presentation/mcp/README.md` — current activation,
   coverage, and removal semantics.
+
+### 15 — 2026-09-10 · The launch route is part of the handshake, and this repository's own entry contradicted the decision
+
+This record says a client entry "invokes globally installed `umbra`". The
+`.mcp.json` committed in this repository ran `npx -y @dastbal/umbra`, and the
+difference is not cosmetic: it is the reason the server intermittently failed to
+connect at all.
+
+### Measured
+
+Spawn to the `initialize` response — which is exactly the window a client's
+connect timeout measures — alternating routes so the first spawn of a session
+does not become the measurement:
+
+| Route | Samples (ms) |
+| --- | --- |
+| `npx -y @dastbal/umbra` | 15,684 · 22,066 · 23,882 · **never answered in 60 s** · 11,657 · 13,912 |
+| globally installed `umbra` | 11,431 · 13,535 |
+| `node` at the global `cli.js` | 12,014 · 12,513 |
+
+The medians are close. **What `npx` ruins is the tail.** `-y` answers the install
+prompt; it does not skip the registry lookup, so every launch depends on the
+network and the spread runs from 11.7 s to 24 s with outright failures in
+between. A client with a 30-second connect timeout therefore fails
+*sometimes* — which is harder to diagnose than failing always, and is what
+happened twice in the session that measured this.
+
+The two installed routes are equivalent within noise, so the shim is preferred:
+it carries no absolute user path into a tracked file.
+
+### Amendment 12's ordering held for the warm-up and not for the import block
+
+Amendment 12 above — *The MCP handshake precedes provider work* — connects the
+transport before provider probing and index work, precisely so warm-up cannot
+delay the handshake. It did what it says. What it could not reach is what runs
+before `startMcpServer`'s first line: `require`ing `indexer.js` cost 2,923 ms — 2,492 ms of it
+`embeddings-resolver.js` pulling in the provider SDKs — and it was paid at module
+load, before `connect`, and even under `--no-index` where the indexer is never
+constructed. Loading it lazily took the local binary's handshake from 5.8–8.7 s
+to 4.4–4.8 s, and collapsed the spread, which matters more than the median for a
+failure that presents as an intermittent timeout.
+
+### Consequence for a consumer, which this record should state
+
+An install that reaches Umbra through `npx` is one network hiccup away from a
+server that never connects, and the operator sees a timeout rather than a cause.
+`umbra init` still does not touch `.mcp.json` — that constraint is unchanged and
+deliberate — so the recommendation belongs in documentation and in this record:
+**install the package and name the binary.** The published tarball is what a
+consumer runs, so a fix to startup cost only reaches them on release.
+
+### Verification evidence
+
+- `spawn -> initialize` timings above, taken with `--no-index` on every route so
+  indexing was never a variable, alternating to separate route cost from the
+  cost of being first.
+- The two `.mcp.json` forms were both exercised; the shim resolved and answered.
