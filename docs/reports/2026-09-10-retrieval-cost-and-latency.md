@@ -143,12 +143,54 @@ graph-derived import list capped at five and already filtered to first-party
 paths. The asymmetry inside one function is the evidence that the uncapped
 sibling is an omission rather than a design.
 
+### What the dependency graph cannot see
+
+`query_dependency_graph` had never been measured. The audit reported one blind
+spot — spec importers — which turns out to be the least interesting member of the
+family. `npm run bench:graph` rebuilds the graph independently with `ts-morph`
+over all 276 source files and diffs it against the table the tool reads:
+
+| Construct | Total | In graph | Recall | Out of scope | Gap |
+| --- | --- | --- | --- | --- | --- |
+| `import` | 537 | 369 | 68.7% | 168 | **0** |
+| `export * from` | 48 | 0 | **0.0%** | 0 | **48** |
+| `import type` | 29 | 23 | 79.3% | 6 | **0** |
+| `export { x } from` | 7 | 2 | 28.6% | 0 | **5** |
+| `require` | 1 | 0 | 0.0% | 1 | 0 |
+| **edges** | **622** | **394** | **63.3%** | 175 | **53** |
+
+The two miss columns are different claims. *Out of scope* means the importing
+file is a spec, so it has no chunks and can never be a `source` row — ADR-030's
+discovery scope, a recorded decision. *Gap* means the indexer walked past a
+construct inside a file it did index.
+
+Read that way the graph is not sloppy, it is **scoped**: ordinary imports inside
+an indexed file are captured perfectly, 0 gap across 369 edges. Everything
+genuinely missing is re-exports, and `export * from` is missing at 48 of 48.
+
+The consequence is concrete. `src/index.ts` is the published package's barrel and
+it re-exports everything, so it has **no outbound edges at all** — which means
+"what breaks if I change `factory.ts`" never names the entry point a consumer
+actually imports.
+
+On the question the tool is asked, inbound: **24 of 164 indexed files report every
+importer, and 140 report an incomplete list.** A refactor reading that gets a
+tidy, short, confident answer.
+
+Two suspected holes could not be measured here and are reported as such rather
+than as passing: a relative specifier resolving to `.tsx`, on a tree with zero
+`.tsx` files, and a tsconfig path alias, on a repository that declares none. Both
+need a Next.js consumer to observe. This repository also contains **zero** dynamic
+`import()` calls — a grep suggests two, but one is a `typeof import('fs')` type
+position and the other is inside a comment.
+
 ## How to audit the next session
 
 ```bash
 npm run build
 npm run bench:retrieval -- --providers ollama --split calibration
 npm run bench:fts-only
+npm run bench:graph
 ```
 
 Both write to `docs/benchmarks/results/`. Compare **hit rates only** across the

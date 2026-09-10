@@ -478,3 +478,45 @@ output knows what the tool cannot see before trusting it for a demolition.
   `grep` as the reference.
 - The three predicate gaps and the four uncaptured import forms are read from
   source, not observed at runtime, and are labelled accordingly.
+
+### Measured 2026-09-10 — the amendment above, with numbers
+
+`npm run bench:graph` rebuilds the dependency graph independently and diffs it
+against the table `query_dependency_graph` reads. On this repository, 276 source
+files of which 170 are indexed:
+
+| Construct | Total | In graph | Recall | Out of scope | Gap |
+| --- | --- | --- | --- | --- | --- |
+| `import` | 537 | 369 | 68.7% | 168 | **0** |
+| `export * from` | 48 | 0 | **0.0%** | 0 | **48** |
+| `import type` | 29 | 23 | 79.3% | 6 | **0** |
+| `export { x } from` | 7 | 2 | 28.6% | 0 | **5** |
+| `require` | 1 | 0 | 0.0% | 1 | 0 |
+| **edges** | **622** | **394** | **63.3%** | 175 | **53** |
+
+The distinction this record needed is in the last two columns. *Out of scope* is
+this decision working as written: the importing file is a spec, it has no chunks,
+it cannot be a `source` row. *Gap* is a construct the indexer walked past inside
+a file it did index.
+
+**The scope is not the problem; the re-exports are.** Ordinary imports inside an
+indexed file are captured perfectly — zero gap across 369 edges — so nothing here
+argues against the exclusion. All 53 genuine misses are re-exports, and
+`export * from` is missing at 48 of 48. `src/index.ts` is the published package's
+barrel and re-exports everything, so it carries **no outbound edges at all**:
+"what breaks if I change `factory.ts`" never names the entry point a consumer
+imports.
+
+Inbound, which is the question the tool is actually asked: **24 of 164 indexed
+files report every importer; 140 report an incomplete list.**
+
+Of the three adjacent gaps named above, only the suffix asymmetry is observable
+here. This tree holds no `.tsx` file, so `resolveModulePath`'s missing `.tsx`
+probe is unmeasurable rather than absent, and the repository declares no
+`compilerOptions.paths`. Both need a Next.js consumer to observe, and the runner
+reports them as `unmeasurable-here` rather than as passing.
+
+One correction to the amendment above: it lists dynamic `import()` among the
+uncaptured constructs, which is true of the indexer and irrelevant to this
+repository — there are **zero** such calls here. A grep suggests two; one is a
+`typeof import('fs')` type position and the other is inside a TSDoc comment.
