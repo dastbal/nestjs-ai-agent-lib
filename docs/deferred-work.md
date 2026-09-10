@@ -1989,3 +1989,66 @@ Measuring the wrong thing. A total conflates the code the caller asked for with
 the envelope it arrived in, and only the second is waste. The signal and framing
 split is the whole value — a single total would let the skeleton grow inside a
 passing ceiling as long as the snippets shrank.
+
+---
+
+## Skipping the index run when there is provably nothing to index
+
+> Deferred 2026-09-10, branch `2.2.5`. Scoped, measured, and **not built,
+> because the measurement stopped justifying it while it was being taken.** The
+> reasoning is recorded because the idea is obvious enough that someone will
+> propose it again.
+
+### The idea
+
+`warmIndexInBackground` runs a full `indexProject()` on every launch unless
+`--no-index` is passed. The `--no-index` branch already asks the right question —
+`hasDurableCoverage`, which is `inspectIndexIntegrity(...).healthy` and therefore
+true only with no stale file, an agreeing stamp, a free lease and no missing
+vectors. Ask it on every launch, and skip the run when the answer is yes.
+
+### Why it was dropped
+
+**Its benefit is inside the noise.** Spawn to `get_index_status` reporting
+`ready`, alternating routes on the local binary:
+
+```
+with-index   163,430 ms   (a genuine reindex: source files had just changed)
+no-index       7,821 ms
+with-index    13,907 ms   (steady state, nothing to do)
+no-index      12,867 ms
+```
+
+The 163 s sample is not an outlier to discard, it is the case working correctly —
+several files were stale and were re-embedded. But the steady-state comparison
+that matters is 13.9 s against 7.8 and 12.9, and the spread between two runs of
+the *same* route is larger than the difference between the routes.
+
+**The problem it was proposed to fix turned out to be somewhere else.** It was
+scoped as part of the connect-timeout work, on the assumption that boot cost
+delays the handshake. It does not: the transport connects before warm-up. The
+handshake's real costs were the launch route and an eager import, both measured
+and both closed — see ADR-024 amendment 15.
+
+**And it would have broken the delivery path for a fix landing the same day.**
+`indexProject()` is where `backfillNestGraph` and `backfillDependencyGraph` run.
+Both exist precisely to repair derived data that no content hash can detect, so
+skipping the run on a healthy index is exactly the case where they must still
+happen — and a healthy index is every working install. Re-exports would have
+reached no existing graph.
+
+### The mechanism to reuse, if it comes back
+
+- `hasDurableCoverage` in `src/presentation/mcp/start-mcp-server.ts` is the
+  predicate, already trusted on the `--no-index` path.
+- The short-circuit belongs **inside** `IndexerService#indexDiscoveredProject`,
+  after the backfills and before the per-file work — not in the caller, which
+  cannot see the backfills.
+
+### What would make it worth building
+
+A measurement with less variance than the effect. That means timing the phases
+inside `indexProject()` rather than the whole launch: discovery, the `md5` sweep
+through `FileRegistry`, the lease, the stamp writes. If one of them is seconds
+on a healthy index, skip that one — which is a smaller and better-aimed change
+than skipping the run.
