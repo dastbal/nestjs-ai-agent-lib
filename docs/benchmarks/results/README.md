@@ -82,9 +82,33 @@ Check, in this order, before believing a difference:
 4. Then, and only then, the difference is about retrieval — and `commit` tells
    you which change to credit.
 
+## The control arm, and the one comparison it does not support
+
+`npm run bench:fts-only` writes a second kind of report here, named the same way
+with `fts-only` in the providers slot. It scores the same corpus with the
+semantic branch removed, which is how *what do the vectors actually buy?* gets an
+answer instead of an opinion. The embedding apparatus is not free — the launch
+probe, the stamp, the writer lease, the per-identity vector rows and the
+reindex-on-model-change all exist to keep vectors consistent — and a number that
+says they buy two points is a different roadmap from one that says twenty.
+
+It reports **two arms**, because switching the vectors off changes two things at
+once. `policy` is `hasGroundedEvidence` as it ships, and with no semantic ranking
+the `hybrid` evidence class is unreachable, so grounding can only come from
+`lexicalExact`: abstention gets stricter by omission rather than by decision.
+`ranking` lifts that gate, isolating ranking quality from the policy side effect.
+Quoting only `policy` credits the vectors for an artefact of the abstention rule.
+
+**Never compare its latency against a `bench-retrieval` report.** The control arm
+runs in-process and pays no transport, no readiness gate and no query embedding;
+the report's `latencyExcludes` field lists exactly what is missing. Its hit rate
+*is* comparable — same corpus, same compiled ranking modules, same coverage
+preflight — and its milliseconds are not.
+
 ## Related
 
 - `docs/benchmarks/embedding-retrieval-corpus.json` — the corpus.
 - `scripts/bench-retrieval.mjs` — the runner.
+- `scripts/bench-fts-only.mjs` — the control arm.
 - `src/core/rag/retrieval-metrics.ts` — the scoring rule, under test.
 - `docs/adr/ADR-031-measure-before-building.md` — why this exists.
