@@ -49,6 +49,21 @@ to avoid an oversized input.
    cards, FTS-only fallback and a semantic-opt-in default — deferred until a
    measured retrieval problem justifies them.
 
+> **Amendment — 2026-09-10.** Two of those four candidates now have their
+> measurement, and it points the opposite way from what "FTS-only fallback"
+> assumed. Scored on the calibration split at `e72d7a8`, removing the semantic
+> branch costs **twenty points of Hit@4** — 0.867 to 0.667 — and eight of the
+> nine positives it loses were *answered* rather than abstained: the lexical arm
+> returned files, confidently, and they were wrong. A fallback that silently
+> degrades to that is worse than an error.
+>
+> So FTS-only survives only as an **opt-in** for a consumer who wants an instant
+> boot and has been told the price, never as a fallback the server chooses on its
+> own. The full reasoning is in *Retrieval without vectors, and the number that
+> closed it*, and `npm run bench:fts-only` is how the number is re-derived on any
+> repository. Pressure-map telemetry and AST symbol cards are untouched and still
+> waiting.
+
 ---
 
 ## Markdown documentation chunks for retrieval
@@ -1019,6 +1034,25 @@ telemetry it would sit beside — or versioned. ADR-018's amendment reversed a
 
 ## A cost estimate before retrieval runs
 
+> **Amendment — 2026-09-10. The premise below was falsified, and the entry is
+> kept with the measurement that falsified it rather than rewritten.**
+>
+> This entry says the real problem is the full scan, and its plan step 1 asks for
+> the scan measured on a large repository. Both halves turned out to be wrong in
+> the same way. Timed in isolation on this repository: the readiness gate 202.4
+> ms, the query embedding 87.2 ms, and **the scan plus fusion 2.2 to 5.6 ms** —
+> about one percent of a 293.6 ms round trip. Fixing the scan would have changed
+> nothing measurable, so the honest objection recorded here ("fix the scan first,
+> and see whether this still wants building") pointed at the wrong thing.
+>
+> What survives is the shape of the idea, not its target. A caller with its own
+> budget still benefits from knowing what an answer cost — but *after* the fact
+> costs nothing extra, because `ask_codebase` already emits a provenance header
+> and the figure can ride along on a line the answer already sends. That form is
+> recorded separately in *A response-cost ceiling, because this gate only has
+> floors*, and it does not need a planner. The pre-flight estimate this entry
+> proposes is superseded by it.
+
 > Recorded 2026-09-02, branch `2.1.3`. Generated in the same divergence phase and
 > not built: it optimizes a path whose real problem is a full scan, and fixing
 > the scan may make the estimate pointless.
@@ -1129,6 +1163,21 @@ arbitrary.
 ---
 
 ## Indexed vector search — `vec0`, and the measurement that would justify it
+
+> **Amendment — 2026-09-10. Moved down the roadmap by a measurement it did not
+> ask for.**
+>
+> The plan below waits on the scan measured against a large repository, and that
+> is still the right gate for *this* work. But the latency question it belongs to
+> now has an answer, and the scan is not where the time goes. On this repository:
+> the readiness gate 202.4 ms, the query embedding 87.2 ms, the scan plus fusion
+> 2.2 to 5.6 ms, against a 293.6 ms median round trip.
+>
+> So the ~69 ms this entry extrapolates for 50,000 chunks would be a real cost
+> and would still be the third largest thing in the request. Making the readiness
+> gate cheap is worth roughly forty times more today and is pure subtraction —
+> see *The readiness gate should answer from the stamp, not recount the
+> repository*. That does not close this entry; it orders it.
 
 > Recorded 2026-09-02, branch `2.1.3`. Scoped and deliberately not built while
 > implementing [ADR-026](./adr/ADR-026-vectors-are-numbers-and-the-database-can-count.md):
@@ -1427,6 +1476,18 @@ a rate has no denominator, a named list where something is missing.
 
 ## Routing a turn by its size, which ADR-002 currently forbids
 
+> **Implemented 2026-09-09** as an amendment to
+> [ADR-002](./adr/ADR-002-model-routing-and-bounded-analysis.md), which is
+> exactly what step 1 below asked for: the decision came first, and the answer
+> was the third option — route automatically only when the operator expressed no
+> explicit choice, and always announce it. The entry is kept rather than deleted
+> because the reasoning about *why it was not simply an improvement* is what a
+> future reader needs before touching the resolution order again.
+>
+> Noticed 2026-09-10, still marked deferred a day after it shipped. This file's
+> own header says an implemented entry moves out and becomes an ADR; the second
+> half happened and the first did not, which is the small drift worth naming.
+
 > Deferred 2026-09-08 while finishing ADR-031 phase 2. Named as a phase-2 goal
 > in that record; deliberately not built, because building it would contradict
 > an accepted decision without saying so.
@@ -1468,3 +1529,463 @@ lesson already recorded there that a missing entry must not read as zero.
 3. Early rejection is the half that needs no decision: a request already known
    to exceed the window can be refused before the round trip, whatever the
    routing policy turns out to be. It is blocked only on the window table.
+
+---
+
+## Retrieval without vectors, and the number that closed it
+
+> **Closed 2026-09-10 by measurement**, not by argument. Kept rather than
+> deleted, because the reasoning is what stops this being re-proposed every time
+> the embedding machinery costs someone an afternoon — and because the *shape* of
+> the answer is more useful than the verdict.
+>
+> Recorded 2026-09-10, branch `2.2.5`. The heretical candidate of the divergence
+> ritual that followed the 2.2.5 retrieval audit, in its lateral form: the
+> "delete the load-bearing thing" lens applied to the vectors.
+
+### The idea
+
+Remove the semantic branch. `ask_codebase` answers from FTS5, the dependency
+graph and TSDoc enrichment alone.
+
+The appeal was never the ranking, it was everything downstream of it. The launch
+probe, the index stamp, the writer lease, the per-identity vector rows, the
+dimension checks, the reindex-on-model-change and the readiness gate all exist to
+keep vectors consistent. Delete the vectors and that apparatus becomes
+unnecessary: boot is instant, there is no coverage to verify, no provider to
+resolve. This file already carried two milder versions — *FTS-only fallback* and
+*a semantic-opt-in default* — both waiting, per the *Long-context Ollama
+embedding profiles* entry, on "a measured retrieval problem".
+
+### What the measurement said
+
+`scripts/bench-fts-only.mjs`, calibration split, commit `e72d7a8`, 169 files and
+1,022 chunks, both arms under a 100% reachable ceiling with 10 of 10 negatives
+provable:
+
+| Arm | hit@4 | mrr |
+| --- | --- | --- |
+| hybrid | 0.867 | 0.683 |
+| fts-only | 0.667 | 0.585 |
+
+Twenty points. **The shape of the loss is the part worth keeping.** Of the nine
+positives only the vectors rescue, eight were *answered* by the lexical arm — it
+returned files, confidently, and they were the wrong ones. Only one abstained. So
+the vectors are not buying recall; they are buying the difference between a
+confident wrong answer and a right one, which is the failure mode that costs a
+consuming agent most. And in 45 positives there was no case where fusion
+displaced a correct lexical hit, so the fusion is not taxing the lexical arm.
+
+Two points of the twenty are an artefact rather than ranking: with no semantic
+branch the `hybrid` evidence class is unreachable, so `hasGroundedEvidence` can
+only ground on `lexicalExact` and abstention tightens by omission. The control
+arm reports both arms so that side effect is never credited to the vectors.
+
+### What did not survive the same measurement
+
+The *reason* the apparatus felt expensive was latency, and that was
+misattributed. Timed in isolation against the same index: the readiness gate 202
+ms, the query embedding 87 ms, the search itself 2.2 to 5.6 ms. The embedding is
+the smaller half of the cost and the search is about one percent of a round trip.
+The vectors were being blamed for a bill the readiness gate had run up.
+
+### What would reopen it
+
+A repository where the gap narrows. Twenty points is this corpus on this
+repository, whose identifiers are unusually descriptive — a codebase with terse
+or non-English names gives FTS5 much less to match on, and it is not obvious
+which way that moves the number. `--root` makes that run one flag away, and the
+corpus would need its own expected paths for the new repository.
+
+The milder forms stay live. An opt-in `--no-semantic` for a consumer who wants
+instant boot and accepts 0.667 is a product decision this measurement does not
+settle; it only says that consumer is trading twenty points, and now they can be
+told so.
+
+---
+
+## The readiness gate should answer from the stamp, not recount the repository
+
+> Deferred 2026-09-10, branch `2.2.5`. The largest single latency win available,
+> and the only thing in this file that is pure subtraction. Not built in the
+> session that measured it, because it changes when Umbra is allowed to say
+> "ready", and getting that wrong is the failure ADR-025 exists to prevent.
+
+### The idea
+
+`readReadiness` should read the index stamp and the lease. The full integrity
+sweep should run in `umbra doctor --index`, where an operator asked for it.
+
+### What is actually true today
+
+`src/presentation/mcp/start-mcp-server.ts` calls `inspectIndexIntegrity` on
+**every** `ask_codebase` call. That opens a second SQLite connection, re-runs
+`WorkspaceDiscoveryService.discover()`, and md5-hashes every discovered source
+file — to re-derive facts `.umbra/index.identity.json` already records.
+
+Measured on this repository, 169 files: **202.4 ms median over six runs**
+(173.5 to 316.1) against a 293.6 ms median round trip, in which the search itself
+is 2.2 to 5.6 ms. The cost is per call and scales with the file count of the
+repository being served, not with the question being asked.
+
+It also explains a finding an audit misattributed. `query_nest_graph`,
+`query_dependency_graph` and `run_integrity_check` do not pass through this gate
+and `ask_codebase` does. That, not the embedding call, is the two-orders-of-
+magnitude latency gap between them.
+
+### The mechanism to reuse — do not invent one
+
+- `src/core/rag/index-stamp.ts` already records provider, model, dimensions,
+  `discoveredFiles`, `coveredFiles` and `status`, and ADR-030 already defines a
+  `complete` stamp as one whose facts agree.
+- `src/core/rag/index-run-lease.ts` is the existing invalidation signal: a
+  single-writer lease with a heartbeat, stale after 90 s. A write in flight is
+  exactly the state a cheap check must still notice.
+- `src/core/tools/utils/bounded-read.ts` is the precedent for an env-overridable
+  bound, if the cheap path ends up wanting a re-check interval.
+
+### The hazard that decides whether this ships
+
+A memoized "ready" over an index that has since broken. ADR-024 made semantic
+retrieval retryable precisely so a not-yet-ready index is a retry rather than a
+wrong answer, and this trades some of that certainty for latency. The question to
+answer before writing code is not *how do we cache it* but **what must still
+invalidate it**: a lease becoming active, a stamp whose file counts moved, a
+schema change. Anything that can go stale without one of those three firing
+becomes a wrong answer with a fast response time.
+
+### Plan
+
+1. Establish which of `inspectIndexIntegrity`'s conjuncts can change without the
+   stamp or the lease changing. That set is the whole design.
+2. Split the function: a cheap readiness read for the hot path, the existing full
+   sweep for `umbra doctor --index` and `get_index_status`.
+3. Keep the full sweep reachable and keep its message. "Run umbra doctor
+   --index" is only useful advice while the thing it names still does the work.
+4. Measure the same three stages again. A change that does not move the 202 ms
+   did not do what it was for.
+
+### Cost
+
+Free at runtime, which is the point. The cost is the reasoning in step 1, plus a
+spec per invalidation path.
+
+### What would make it worthless
+
+Making it cheap by making it wrong. If the honest answer to step 1 is that most
+conjuncts *can* drift silently, the correct outcome is to keep the sweep and
+cache it behind a short TTL instead — slower to write, and still worth 200 ms.
+
+---
+
+## The answer as a diagnostic, not a photocopy
+
+> Deferred 2026-09-10, branch `2.2.5`. Produced by the ideation ritual's "borrow
+> from another discipline" lens, taking a compiler's diagnostics. The cheap first
+> step is a bug fix and should be taken on its own; the rest changes what every
+> consuming agent reads and needs an ADR.
+
+### The idea
+
+A compiler does not hand you the file. It hands you a span, a message, and a
+`note:` pointing at the related location. `ask_codebase` would return, per hit:
+the path and line range, **the reason it matched**, and a note the dependency
+graph can already produce. The body stays reachable through `safe_read_file`.
+
+The elegance is that it *removes* code. If the answer emits only signal with its
+reason, there is no volume left to cap — the filter and the ceiling stop being
+needed, because the photocopy is gone.
+
+### What is actually true today
+
+- **The reason is already computed and thrown away.** `hybrid-ranking.ts` derives
+  `evidence` and `lexicalExact` in order to decide whether to abstain, and
+  `RetrieverService` never emits either. It is the most informative fact about a
+  hit and the only one that does not reach the caller.
+- **The skeleton is emitted raw and uncapped.** `RetrieverService` interpolates
+  the stringified `file_registry.skeleton_signature` JSON, bypassing the
+  `formatSkeleton` that exists in `src/core/tools/analysis-tools.ts`. Three lines
+  above, the graph-derived import list is capped at five and filtered to
+  first-party paths. One function, two lists, opposite discipline.
+- **Imports travel twice.** `NestChunker#extractClassContext` prepends every
+  import declaration to each `class_signature` chunk, so they appear once as
+  skeleton JSON and once inside the snippet. In `src/core/llm/provider.ts` that
+  chunk is 289 tokens of which 136 are the import block.
+- **Nothing bounds the response.** No max-tokens, max-files or truncation
+  constant exists on any MCP tool result. `read_file` has
+  `DEFAULT_MAX_READ_TOKENS` at 6,000; `ask_codebase` has nothing.
+
+Measured across 169 skeletons here: 15,710 tokens, 93 per file, of which 14.2%
+is external package imports and 43.3% is the JSON envelope. On a consumer
+repository importing a sixty-name Zoho SDK list the same block reached 65% of one
+answer — so the defect is repository-independent and its price is not.
+
+### The mechanism to reuse — do not invent one
+
+`hybrid-ranking.ts` for the reason. `formatSkeleton` for the rendering.
+`dependency_graph` for the notes, which is one query. `bounded-read.ts` for the
+shape of an env-overridable bound, if one is still wanted afterwards.
+
+### The hazard that decides whether this ships
+
+An agent that receives spans and immediately calls `safe_read_file` four times
+spends more in total than one handed the code. That is measurable before building
+anything: count `safe_read_file` calls per turn following an `ask_codebase` call
+in `.umbra/telemetry/`. If the number is already high, this makes the round trip
+cheaper and the turn more expensive.
+
+ADR-011's freeze also applies, and is narrower than it looks: it covers what
+`generateSkeleton` **stores**, not what the retriever **renders**. Changing the
+rendering needs no reindex; changing the chunker does.
+
+### Plan
+
+1. **Take the cheap fix separately.** Filter the rendered skeleton to relative
+   specifiers and cap it, the way its sibling three lines above already is, and
+   stop duplicating imports into `class_signature` content. No stored shape
+   changes, no reindex, defensible on its own.
+2. Measure `safe_read_file`-after-`ask_codebase` from telemetry. This decides
+   whether step 4 is an improvement or a transfer.
+3. Emit `evidence` and `lexicalExact` per hit. Cheap, additive, and useful even
+   if nothing else here is built.
+4. Only then the span-and-note form, as an ADR, with the body behind an opt-in
+   argument rather than removed.
+
+### Cost
+
+Steps 1 and 3 are small. Step 4 changes what every consuming agent reads, which
+is why it is last and why it is a record before it is a commit.
+
+### What would make it worthless
+
+Truncating the file that mattered. A short answer that looks complete is worse
+than a long one — which is why the audit's original "just cap it" framing was not
+enough by itself. A cap without a reason field makes the answer smaller and no
+more legible.
+
+---
+
+## An abstention that asks instead of refusing
+
+> Deferred 2026-09-10, branch `2.2.5`. Produced by the ideation ritual's "invert
+> who asks" lens. **It contradicts an accepted decision** and needs its own ADR
+> before any code: ADR-024 names elicitation as the door to writes and says
+> plainly that it should not be built because it became easy.
+
+### The idea
+
+When `findUnknownTerms` finds a subject term the index has never contained, Umbra
+currently names it and stops. Instead it would **ask** — *did you mean
+`checkpoint`?* — through MCP elicitation, and store the answer as an approved
+alias.
+
+Every abstention today discards information. This is the only mechanism in the
+project that would let the vocabulary gap close itself.
+
+### What is actually true today
+
+- The learning mechanism exists and is unreachable. `RetrievalMemoryService`
+  implements `approve`, and **nothing on the MCP surface can call it**. A consumer
+  running `umbra mcp` is told which term is missing and given no route to resolve
+  it.
+- ADR-028's residual gap has two classes and only one is morphological. `-ly` and
+  `-ion` are derivation, which no addition to `INFLECTIONS` reaches; a synonym is
+  what ADR-029's aliases are for.
+- **There is an unrecorded defect on this exact path that must be fixed with it,
+  or before it.** `knownTerms()` exempts only `trigger_terms`, while `expand()`
+  appends `context_terms` into the query the gate then probes, and `approve()`
+  validates that `verifiedPaths` is non-empty but never validates that the
+  context terms exist in the index. An approved alias carrying an absent context
+  term therefore makes **every** query hitting that trigger abstain permanently,
+  and the clarification retry re-expands, so it cannot recover. Shipping an
+  alias-writing path on top of that turns a latent trap into a reachable one.
+
+### The mechanism to reuse — do not invent one
+
+This file's *`ask_human` with multiple choice* entry carries the interrupt and
+resume analysis, and both hazards apply unchanged: `interrupt()` throws to
+suspend, so the tool body re-runs from the top, and any `try/catch` between the
+tool and the graph must rethrow the suspension first. The MCP SDK implements
+elicitation, adopted with ADR-024's sixth amendment.
+
+### The hazard that decides whether this ships
+
+ADR-024 constraint 2 makes writes technically unavailable in MCP mode, and that
+record calls widening it *"a much larger decision than this record"*. The
+distinction this idea rests on is that **a clarifying question is not a write**.
+That distinction is either sound, or it is the first step of an argument for
+arbitrary writes. It has to be settled in a record before it is settled in code.
+
+Second hazard: a client without elicitation must end up no worse off than today,
+so the refusal path stays and the question is an enhancement rather than a
+replacement.
+
+### Plan
+
+1. Fix the `context_terms` defect first, on its own. It is a bug today, with or
+   without this feature.
+2. Write the ADR: is a clarifying question a write? If yes, this stops here.
+3. Only then, elicitation on the abstention path, with the current refusal as the
+   fallback for clients that lack it.
+4. Store the answer with provenance, and require an alias to name an indexed
+   term, so step 1's trap cannot be re-entered through the front door.
+
+### Cost
+
+One extra round trip per abstention, on a path that currently costs no provider
+call at all — ADR-028 put the gate before the embedding on purpose. Worth stating
+plainly: this makes the cheapest path in retrieval more expensive, in exchange
+for it teaching the index something.
+
+### What would make it worthless
+
+A model that answers its own clarifying question. If the client resolves the
+elicitation without a human, the alias store fills with a model's guesses about
+vocabulary, and an approved alias is trusted forever. It must be answerable only
+by a person, or this is worse than abstaining.
+
+---
+
+## The sentences in the test titles as their own chunk type
+
+> Deferred 2026-09-10, branch `2.2.5`. **Contradicts ADR-030** and needs an
+> amendment to it, not a quiet implementation. The original heretical candidate
+> was "index the test files"; this is David's sharper form, and the sharpening is
+> what makes it survivable.
+
+### The idea
+
+Do not index the test's code. Index its **sentences**.
+
+A test title is a natural-language sentence describing a behaviour, and a
+semantic query is a natural-language sentence about a behaviour. The
+implementation is code; the title is prose. For matching a question the title
+wins — and the titles are already written, already maintained, and already
+verified by CI.
+
+David's framing is why this is worth more than a usage index: the specs are where
+a repository writes down **the cases that break it**. That is the one thing no
+other artifact in the tree records executably.
+
+### What is actually true today
+
+`isIndexableSource` in `src/core/config/workspace-discovery.ts` drops
+`.spec.ts`, `.test.ts`, `.d.ts` and the story files, and one predicate serves
+both the semantic index and the dependency graph. So no test content is indexed
+at all, here or in a consumer's repository — and the graph consequence is now
+recorded in ADR-030's 2026-09-10 amendment.
+
+### The mechanism to reuse — do not invent one
+
+ADR-029 is the precedent and it is nearly exact: TSDoc enriches code metadata as
+its own labelled contribution *without becoming code evidence*. A test title
+wants the same treatment — a distinct chunk type, labelled in the answer, so it
+can match a question without being presented as source.
+
+`ts-morph` already parses these files whenever they are enumerated, and the call
+expression is trivial to reach. `assessNegativeHealth` already exists to catch
+the corpus damage this could cause.
+
+### The hazard that decides whether this ships
+
+**The negatives.** This file already records a negative dying twice because a
+comment written to explain a defect named the term that case depended on, three
+hours after the commit. Test titles introduce far more English vocabulary than
+source does, so indexing them could rot several negatives at once — and a rotted
+negative raises the correct-abstention rate for free, which is the exact
+mis-measurement ADR-031 was written about.
+
+`assessNegativeHealth` would catch it, but only if it is run *before* the change
+lands and compared after. Otherwise the corpus quietly stops testing abstention.
+
+### Plan
+
+1. Run `assessNegativeHealth` now and record which negatives would rot if test
+   titles entered the index. If the answer is most of them, the corpus needs new
+   negatives before this is possible at all.
+2. Decide the scope: which call expressions count, and whether the enclosing
+   describe chain is joined into the sentence. A joined chain reads better and is
+   more vocabulary.
+3. Amend ADR-030 with the decision, since it changes the scope that record sets.
+4. Index as a distinct chunk type, labelled in the answer as a test expectation
+   and never as source.
+5. Score it. A new chunk type that does not move Hit@4 is index weight for
+   nothing.
+
+### Cost
+
+Small in tokens — a title is ten words, not a file, so this does not double the
+index the way indexing test bodies would. Real in churn: titles change more often
+than implementations, so more files go stale more often.
+
+### What would make it worthless
+
+A repository whose test titles are all "works". The value is entirely in the
+prose quality of someone else's test names, which this project cannot control and
+should not assume. Worth measuring on a consumer repository before believing the
+number from this one, where the titles happen to be unusually descriptive.
+
+---
+
+## A response-cost ceiling, because this gate only has floors
+
+> Deferred 2026-09-10, branch `2.2.5`. Named as the follow-up metric in ADR-031's
+> 2026-09-10 amendment. Not built alongside the measurement that motivated it,
+> because a ceiling calibrated on one repository repeats the mistake ADR-028
+> named.
+
+### The idea
+
+`measureResponseCost(text)` beside `retrieval-metrics.ts`, reported per case by
+both benchmark runners, with a token ceiling asserted in the CI gate.
+
+### What is actually true today
+
+`retrieval-gate.spec.ts` asserts a hit floor, a false-abstention cap and a
+correct-abstention floor. Nothing asserts anything about the **size** of an
+answer, and nothing anywhere bounds it.
+
+That is why a skeleton block reaching 65% of an answer on a consumer repository
+was something an audit found rather than something the build reported.
+`js-tiktoken` is already a dependency, so the counting costs nothing new.
+
+### The mechanism to reuse — do not invent one
+
+`retrieval-metrics.ts` is already pure, type-checked and covered, and
+`bench-retrieval.mjs` states the rule this must follow: scoring lives under test
+because a metric that drifts silently turns every later number into a false
+report of progress. `src/core/observability/metrics.ts` holds the pricing
+vocabulary. Report keys must be **additive**, so the five committed reports keep
+parsing.
+
+### The hazard that decides whether this ships
+
+A ceiling fitted to this repository. ADR-028 rejected a threshold "fitted to one
+repository" in favour of a property the index answers about itself, and a token
+ceiling has no such self-answering form: it is a constant, and it will be wrong
+for somebody. It needs calibrating against at least two repositories with
+different import profiles, and it should start as a **reported** number rather
+than a failing assertion, the way the fixture gate did.
+
+### Plan
+
+1. `measureResponseCost` plus spec: total, signal, framing and external-import
+   tokens, and the file count. Classify an external import by the rule
+   `extractDependencies` already uses — the specifier does not start with a dot.
+2. Additive keys in both runners' reports.
+3. Report in CI for a few runs to establish variance. A gate that fails on noise
+   is disabled within a week.
+4. Only then a ceiling, calibrated on two repositories and recorded with both.
+
+### Cost
+
+Nothing at runtime: this measures reports, not requests. If the provenance header
+ever carries the figure to the caller, that is a handful of tokens on a line the
+answer already sends.
+
+### What would make it worthless
+
+Measuring the wrong thing. A total conflates the code the caller asked for with
+the envelope it arrived in, and only the second is waste. The signal and framing
+split is the whole value — a single total would let the skeleton grow inside a
+passing ceiling as long as the snippets shrank.
