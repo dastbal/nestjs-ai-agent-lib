@@ -2062,3 +2062,74 @@ inside `indexProject()` rather than the whole launch: discovery, the `md5` sweep
 through `FileRegistry`, the lease, the stamp writes. If one of them is seconds
 on a healthy index, skip that one — which is a smaller and better-aimed change
 than skipping the run.
+
+---
+
+## `query_nest_graph` is published over MCP and unreachable from the agent
+
+> Recorded 2026-09-10, branch `2.2.6`. Found while restructuring the README,
+> which advertised the tool in the `deep` agent's tool list. Not fixed there,
+> because deciding whether the agent should have it is a capability decision and
+> the README fix only had to stop lying.
+
+### What is actually true today
+
+`queryNestGraphTool` is imported by `src/presentation/mcp/tool-catalog.ts` and by
+nothing else outside its own module. It is **absent from
+`CAPABILITY_REGISTRY`** in `src/core/agent/agent-kernel.ts`, whose own TSDoc
+calls that registry "the single source of truth for built-in capabilities and
+their concrete tools".
+
+So the MCP server publishes it and the agent cannot call it. The README listed it
+among the `deep` mode's tools until 2026-09-10.
+
+This is the same shape ADR-013 recorded twice and the registry's own comment
+records a third time: `queryDependencyGraphTool` was reachable "only by importing
+it directly", which is why `read_dependency_graph` exists as a capability. The
+Nest graph tool never got that treatment.
+
+Note that `read_dependency_graph` exists and `simple` mode still does not declare
+it — the capability is registered, and no mode asks for it. Whatever is decided
+here should decide that too, since it is one question asked about two tools.
+
+### The mechanism to reuse — do not invent one
+
+`CAPABILITY_REGISTRY` and the comment above `read_dependency_graph`, which
+already argues the shape of the answer: the graph query "costs nothing and needs
+no credentials", so it was made its own capability rather than folded into
+`search_codebase`, which also grants a tool that writes. A `read_nest_graph`
+capability is the same argument for the same kind of tool.
+
+`prompt-tool-contract.spec.ts` is the guard that would have caught the README's
+version of this if a README were a prompt. It checks that every tool a mode's
+prompt names is a tool that mode declares.
+
+### The hazard that decides whether this ships
+
+Adding a capability is not free: it is another tool in the model's catalog on
+every turn, and ADR-019 measured that a turn's cost is the bound. The honest
+question is not "can the agent have it" but "does the agent's work need it" — the
+`deep` prompt never told the model to use it, so nothing regressed while it was
+missing, which is weak evidence that nothing needs it.
+
+The opposite reading is equally available: the agent has spent whole turns
+reading module files by hand to answer a wiring question this tool answers in one
+SQL query, and nobody measured that either.
+
+### Plan
+
+1. Count it before adding it. `ask_codebase` calls per turn and
+   `safe_read_file`-after-`ask_codebase` are already in
+   `.umbra/telemetry/interactive-turns.jsonl`; a wiring question answered by
+   reading three module files is visible there.
+2. If it earns a place: register `read_nest_graph` beside
+   `read_dependency_graph`, with the same reasoning, and decide in the same
+   change whether any mode declares either.
+3. Extend `prompt-tool-contract.spec.ts` if a prompt begins naming it.
+
+### What would make it worthless
+
+Registering it and having no prompt mention it. That is the state
+`read_dependency_graph` is in right now: a capability nothing asks for, which
+costs a line in a registry and buys nothing. Better to leave the tool MCP-only
+and let the client ask, which is what the README now says.
