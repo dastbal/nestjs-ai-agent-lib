@@ -13,7 +13,8 @@ CLI usage, configuration, security behavior, and migration notes.
   measurement series and the protocol for comparing two runs. A quality claim
   about retrieval belongs there before it belongs in prose.
 - [Reports](reports/) are narrative measurement records — what was measured, on
-  which commit, and what the numbers cannot support.
+  which commit, and what the numbers cannot support. The 2026-09-10 pair covers
+  retrieval cost and latency, and the issue drafts that came out of it.
 - [Migrating to Umbra 2.0](MIGRATING-TO-UMBRA.md) maps the former package and
   command names to the public Umbra identity.
 - [LangChain reference index](langchain-llms-index.md) is reference material,
