@@ -79,12 +79,101 @@ Check, in this order, before believing a difference:
    rate on its own.
 3. Same `negativeHealth.provable`. A rotted negative raises the correct
    abstention rate for free.
-4. Then, and only then, the difference is about retrieval — and `commit` tells
+4. **Same index size** — `indexSize` in a control-arm report, the `files:` and
+   `chunks:` lines of `indexStatus` in a hybrid one. See below; this check was
+   added after it was needed.
+5. Then, and only then, the difference is about retrieval — and `commit` tells
    you which change to credit.
+
+### Why the index size is its own check
+
+Check 2 does not cover it, and the gap is easy to walk into: a **new source file
+that is not an expected path** leaves `reachableHitCeiling` at 1.0 and still
+moves the numbers. BM25 is corpus-relative, so one added document shifts IDF and
+every candidate rank behind it, and a shifted rank changes the fused score.
+
+Measured on this repository the day the check was added, by committing a single
+new module and re-running with no other change:
+
+```
+169 files, 1022 chunks   fts-only policy   hit 0.667   mrr 0.585
+170 files, 1029 chunks   fts-only policy   hit 0.644   mrr 0.574
+```
+
+One file, 2.2 points, and one case flipped out of grounded — which shows up as a
+false abstention rather than a bad rank. That was reproduced on the control arm
+specifically because it has no embedding and no rendering: the only variable left
+was the index.
+
+Two consequences worth keeping in mind. **Retrieval is deterministic** — two runs
+at the same commit over the same index returned byte-identical outcomes for all
+55 cases, so a difference is never noise and always has a cause. And **a
+benchmark run is not a measurement of a commit alone**; it is a measurement of a
+commit against an index. Adding the module you are about to benchmark is enough
+to invalidate the comparison you are running it for.
+
+`indexSize` is necessary and not sufficient: it moves when a file appears or
+disappears, and it does not move when a file's **content** changes. Editing a
+source file leaves the counts identical while its chunks, its FTS rows and its
+vectors all go stale — including the comments, which are indexed like any other
+text. Both runners refuse in that state rather than scoring a mixture of two code
+states, which is what the integrity preflight and its stale-path list are for.
+Reindex, then benchmark; the run that refuses has told you something.
+
+## The control arm, and the one comparison it does not support
+
+`npm run bench:fts-only` writes a second kind of report here, named the same way
+with `fts-only` in the providers slot. It scores the same corpus with the
+semantic branch removed, which is how *what do the vectors actually buy?* gets an
+answer instead of an opinion. The embedding apparatus is not free — the launch
+probe, the stamp, the writer lease, the per-identity vector rows and the
+reindex-on-model-change all exist to keep vectors consistent — and a number that
+says they buy two points is a different roadmap from one that says twenty.
+
+It reports **two arms**, because switching the vectors off changes two things at
+once. `policy` is `hasGroundedEvidence` as it ships, and with no semantic ranking
+the `hybrid` evidence class is unreachable, so grounding can only come from
+`lexicalExact`: abstention gets stricter by omission rather than by decision.
+`ranking` lifts that gate, isolating ranking quality from the policy side effect.
+Quoting only `policy` credits the vectors for an artefact of the abstention rule.
+
+**Never compare its latency against a `bench-retrieval` report.** The control arm
+runs in-process and pays no transport, no readiness gate and no query embedding;
+the report's `latencyExcludes` field lists exactly what is missing. Its hit rate
+*is* comparable — same corpus, same compiled ranking modules, same coverage
+preflight — and its milliseconds are not.
+
+## The graph arm, which needs no corpus at all
+
+`npm run bench:graph` writes a third kind of report, `arm: 'graph-recall'`. It
+does not score retrieval: it rebuilds the dependency graph independently with
+`ts-morph` — every file in the tree, every import-like construct, resolved by
+probing more shapes than the indexer does — and diffs it against the
+`dependency_graph` table `query_dependency_graph` reads. There is no ground truth
+to curate, because the source **is** the ground truth.
+
+It reports recall **per construct**, following the precedent
+`nest-wiring-shapes.json` set: name the shapes the tool goes blind to rather than
+publishing one number that hides them. And it separates two kinds of miss, only
+one of which is a defect:
+
+- **out-of-scope** — the importing file is a spec, a `.d.ts` or a story, so it has
+  no chunks and can never be a `source` row. That is ADR-030's discovery scope, a
+  recorded decision, and its consequence for this tool is recorded in that
+  record's 2026-09-10 amendment.
+- **gap** — a construct the indexer walked past inside a file it *did* index.
+
+A construct present in the tree that produced no in-repo edge is reported as
+`unmeasurable-here` with its occurrence count, never omitted. A row that
+disappears from a table reads as covered, and two of the suspected holes — a
+relative specifier resolving to `.tsx`, and a tsconfig path alias — cannot be
+observed on a repository that contains neither.
 
 ## Related
 
 - `docs/benchmarks/embedding-retrieval-corpus.json` — the corpus.
 - `scripts/bench-retrieval.mjs` — the runner.
+- `scripts/bench-fts-only.mjs` — the control arm.
+- `scripts/bench-graph-recall.mjs` — the graph arm.
 - `src/core/rag/retrieval-metrics.ts` — the scoring rule, under test.
 - `docs/adr/ADR-031-measure-before-building.md` — why this exists.

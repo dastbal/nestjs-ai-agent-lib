@@ -271,38 +271,89 @@ export class NestChunker {
     sourcePath: string,
   ): GraphEdge[] {
     const edges: GraphEdge[] = [];
-    const imports = sourceFile.getImportDeclarations();
 
     // Necesitamos el directorio absoluto para resolver, así que combinamos CWD + sourcePath
     // Nota: Asumimos que sourcePath entra como relativa, ej: 'src/users/users.service.ts'
     const absoluteSourcePath = path.resolve(this.rootDir, sourcePath);
     const sourceDir = path.dirname(absoluteSourcePath);
 
-    for (const imp of imports) {
-      const moduleSpecifier = imp.getModuleSpecifierValue();
-
+    /**
+     * Records one edge for a module specifier, when it names a file on disk.
+     *
+     * Shared by imports and re-exports so the two cannot drift: the filter, the
+     * resolution and the normalization below are the same rules whichever node
+     * kind the specifier came from.
+     *
+     * @param moduleSpecifier - The specifier as written, or `undefined` for an
+     * export with no `from` clause, which re-exports nothing.
+     * @param relation - How the source depends on the target.
+     */
+    const link = (
+      moduleSpecifier: string | undefined,
+      relation: DependencyRelation,
+    ): void => {
       // 1. Filter: We only care about internal relative imports (starting with '.')
-      if (moduleSpecifier.startsWith('.')) {
-        // 2. Resolution: Find the physical .ts file on disk
-        const resolvedPath = this.resolveModulePath(sourceDir, moduleSpecifier);
+      if (moduleSpecifier === undefined || !moduleSpecifier.startsWith('.')) return;
 
-        // 3. Validation: Only link if the file actually exists
-        if (resolvedPath) {
-          // 4. Normalization: Convert back to relative path for the Database
-          // We use split/join to force forward slashes (/) even on Windows for DB consistency.
-          const relativeTarget = path
-            .relative(this.rootDir, resolvedPath)
-            .split(path.sep)
-            .join('/');
+      // 2. Resolution: Find the physical .ts file on disk
+      const resolvedPath = this.resolveModulePath(sourceDir, moduleSpecifier);
 
-          edges.push({
-            sourcePath: sourcePath, // Already relative
-            targetPath: relativeTarget,
-            relation: 'import',
-          });
-        }
-      }
+      // 3. Validation: Only link if the file actually exists
+      if (!resolvedPath) return;
+
+      // 4. Normalization: Convert back to relative path for the Database
+      // We use split/join to force forward slashes (/) even on Windows for DB consistency.
+      const relativeTarget = path
+        .relative(this.rootDir, resolvedPath)
+        .split(path.sep)
+        .join('/');
+
+      edges.push({
+        sourcePath: sourcePath, // Already relative
+        targetPath: relativeTarget,
+        relation,
+      });
+    };
+
+    for (const imp of sourceFile.getImportDeclarations()) {
+      link(imp.getModuleSpecifierValue(), 'import');
     }
+
+    // `export * from './x'` and `export { y } from './x'` are ExportDeclarations,
+    // not ImportDeclarations, so the loop above never saw them and they produced
+    // no edge at all. Measured at 0 of 48 on this repository before this: every
+    // genuine hole in the dependency graph was a re-export, and the worst case
+    // was `src/index.ts` — the published package's barrel re-exports the whole
+    // public surface, so the entry point a consumer actually imports had no
+    // outbound edges, and "what breaks if I change this" never named it.
+    for (const exported of sourceFile.getExportDeclarations()) {
+      link(exported.getModuleSpecifierValue(), 're-export');
+    }
+
+    // `require('./x')` and `import('./x')` are call expressions, not
+    // declarations, so neither loop above reaches them. They were left out at
+    // first because this tree held exactly one relative `require`, in a spec —
+    // unmeasurable, and reported as such. That changed the moment
+    // `start-mcp-server.ts` began loading the indexer lazily to keep it off the
+    // handshake: three deliberate relative requires appeared in indexed source,
+    // and the graph arm reported three gaps in the next run.
+    //
+    // A lazily loaded module is not a lesser dependency. It is the one a reader
+    // is least likely to find by eye, which is the whole reason to record it.
+    for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      const callee = call.getExpression().getText();
+      if (callee !== 'require' && callee !== 'import') continue;
+
+      const [argument] = call.getArguments();
+      if (argument === undefined) continue;
+      // Read from the literal rather than the type system: a computed specifier
+      // has no static target, so no graph could carry it honestly.
+      const literal = /^['"](.+)['"]$/.exec(argument.getText());
+      if (literal === null) continue;
+
+      link(literal[1], callee === 'require' ? 'require' : 'dynamic-import');
+    }
+
     return edges;
   }
 

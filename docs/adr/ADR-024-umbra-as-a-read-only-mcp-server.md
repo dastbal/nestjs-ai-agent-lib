@@ -5,7 +5,7 @@
 | **Category** | Architecture · Packaging · Integration |
 | **Author** | David Balladares (decision) · Claude (record) |
 | **Date** | 2026-09-02 |
-| **Status** | ✅ **Accepted** — amended 9× 2026-09-04. Amendment 1 was **wrong** and is corrected in amendment 6 |
+| **Status** | ✅ **Accepted** — amended 16× 2026-09-04 → 2026-09-10. Amendment 1 was **wrong** and is corrected in amendment 6 |
 
 ---
 
@@ -927,3 +927,123 @@ would make a global installation fail before its first response.
 - `src/bin/cli.ts` — accurate global MCP wording during manual initialization.
 - `README.md` and `src/presentation/mcp/README.md` — current activation,
   coverage, and removal semantics.
+
+### 15 — 2026-09-10 · The launch route is part of the handshake, and this repository's own entry contradicted the decision
+
+This record says a client entry "invokes globally installed `umbra`". The
+`.mcp.json` committed in this repository ran `npx -y @dastbal/umbra`, and the
+difference is not cosmetic: it is the reason the server intermittently failed to
+connect at all.
+
+### Measured
+
+Spawn to the `initialize` response — which is exactly the window a client's
+connect timeout measures — alternating routes so the first spawn of a session
+does not become the measurement:
+
+| Route | Samples (ms) |
+| --- | --- |
+| `npx -y @dastbal/umbra` | 15,684 · 22,066 · 23,882 · **never answered in 60 s** · 11,657 · 13,912 |
+| globally installed `umbra` | 11,431 · 13,535 |
+| `node` at the global `cli.js` | 12,014 · 12,513 |
+
+The medians are close. **What `npx` ruins is the tail.** `-y` answers the install
+prompt; it does not skip the registry lookup, so every launch depends on the
+network and the spread runs from 11.7 s to 24 s with outright failures in
+between. A client with a 30-second connect timeout therefore fails
+*sometimes* — which is harder to diagnose than failing always, and is what
+happened twice in the session that measured this.
+
+The two installed routes are equivalent within noise, so the shim is preferred:
+it carries no absolute user path into a tracked file.
+
+### Amendment 12's ordering held for the warm-up and not for the import block
+
+Amendment 12 above — *The MCP handshake precedes provider work* — connects the
+transport before provider probing and index work, precisely so warm-up cannot
+delay the handshake. It did what it says. What it could not reach is what runs
+before `startMcpServer`'s first line: `require`ing `indexer.js` cost 2,923 ms — 2,492 ms of it
+`embeddings-resolver.js` pulling in the provider SDKs — and it was paid at module
+load, before `connect`, and even under `--no-index` where the indexer is never
+constructed. Loading it lazily took the local binary's handshake from 5.8–8.7 s
+to 4.4–4.8 s, and collapsed the spread, which matters more than the median for a
+failure that presents as an intermittent timeout.
+
+### Consequence for a consumer, which this record should state
+
+An install that reaches Umbra through `npx` is one network hiccup away from a
+server that never connects, and the operator sees a timeout rather than a cause.
+`umbra init` still does not touch `.mcp.json` — that constraint is unchanged and
+deliberate — so the recommendation belongs in documentation and in this record:
+**install the package and name the binary.** The published tarball is what a
+consumer runs, so a fix to startup cost only reaches them on release.
+
+### Verification evidence
+
+- `spawn -> initialize` timings above, taken with `--no-index` on every route so
+  indexing was never a variable, alternating to separate route cost from the
+  cost of being first.
+- The two `.mcp.json` forms were both exercised; the shim resolved and answered.
+
+### 16 — 2026-09-10 · Readiness asks whether the index can answer, not whether it is current
+
+This record's constraint says semantic retrieval "stays retryable until durable
+vector coverage is verified". That held, and the verification was doing more than
+the sentence claims: it ran the **full** index inspection on every
+`ask_codebase` call.
+
+Measured back to back on one index: **401 ms** for the full sweep against
+**52 ms** for a check that touches no filesystem, while the search it guards is
+2 to 5 ms. Of the eleven conjuncts the full report combines, exactly two are
+expensive, and both exist to notice a change the database cannot see —
+`discoverSources()` walks the tree and parses tsconfig, and the staleness check
+md5-hashes every discovered source file.
+
+### The distinction this amendment draws
+
+Those two answer *is the index current?* The gate needs *can the index answer?*,
+and the two have different remedies:
+
+| State | Consequence | Gate |
+| --- | --- | --- |
+| a chunk has no vector for the active identity | the result set would be **wrong** | refuses |
+| a source file changed since the last run | one answer may be **dated** | serves |
+
+The second used to refuse the question entirely — in the middle of a refactor,
+at exactly the moment somebody asks. Serving it is the better answer, and it is
+honest only because the reply already carries the index's age: `withProvenance`
+emits `indexedAt`, `filesIndexed` and `status` on every answer, so a caller
+judges staleness itself rather than being told nothing. That was already wired.
+
+**Retryability is unchanged for everything it was written about.** A warming
+index, an absent stamp, a partial stamp, missing vectors, a chunkless file, a
+dimension conflict and an active writer lease all still refuse, still name the
+reason, and still direct the caller to `get_index_status`.
+
+### Completeness moved rather than stopped
+
+`get_index_status`, `umbra doctor --index` and the boot-time coverage check all
+still run the full report. So do both benchmark runners, which refuse on a stale
+index exactly as before — scoring an index is a different job from serving it,
+and conflating them is what made the gate expensive.
+
+### Rejected alternatives
+
+- **Cache the full sweep behind a short TTL.** Still pays it every interval, and
+  invents a staleness window that was not previously there. It keeps the contract
+  literally while making the failure ADR-025 exists to prevent — a stale "ready"
+  over a broken index — newly possible.
+- **Swap md5 for mtime.** Keeps the cost structure and adds a second definition
+  of "changed" beside the registry's hash, which is what `backfillNestGraph`'s
+  own comment warns against.
+
+### Verification evidence
+
+- 401 ms against 52 ms, six runs each, alternating, on one index.
+- `inspectIndexServeability`'s conjuncts are a strict subset of the full
+  report's, so healthy implies serveable. Asserted over the same fixture the
+  full inspection's spec uses, because two predicates about one index are the
+  shape that drifts.
+- An edited file and a newly added file are both serveable while the full report
+  calls them unhealthy — the behaviour change, as a test rather than a claim.
+- It fails closed: an unreadable index is reported unserveable with its reason.

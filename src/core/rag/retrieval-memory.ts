@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { AgentDB } from '../state/db';
+import { findUnknownTerms } from './unknown-terms';
 
 /** A confirmed, local mapping from a user's wording to code-backed context. */
 export interface RetrievalAlias {
@@ -123,6 +124,26 @@ export class RetrievalMemoryService {
     const contextTerms = normalizeAliasTerms(alias.contextTerms);
     const verifiedPaths = [...new Set(alias.verifiedPaths)].slice(0, 4);
     if (triggerTerms.length === 0 || contextTerms.length === 0 || verifiedPaths.length === 0) {
+      return false;
+    }
+
+    // A context term exists to *hit* the index: it translates the operator's
+    // wording into the words this repository actually uses. One the index has
+    // never contained is a malformed alias, and an unusually expensive one.
+    //
+    // `expand` appends context terms to the query, and that expanded query is
+    // what the abstention gate probes — while `knownTerms` below exempts
+    // trigger terms only, for the reason documented there. So an approved alias
+    // carrying an absent context term makes **every** query matching its
+    // trigger abstain, naming a term the operator supplied, and the
+    // clarification retry re-expands, so it cannot recover. Refusing the input
+    // is the whole fix.
+    //
+    // Validated through the gate's own `findUnknownTerms` rather than a second
+    // probe, so the two cannot disagree about what "absent" means. It examines
+    // the terms the gate would examine, which is the right set: a context term
+    // the gate never probes cannot poison it.
+    if (findUnknownTerms(this.db, contextTerms.join(' ')).length > 0) {
       return false;
     }
 

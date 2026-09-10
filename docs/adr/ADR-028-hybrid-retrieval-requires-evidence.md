@@ -243,3 +243,45 @@ term presence. It is a fair hard case and is left standing rather than edited
 away.
 
 Report: `docs/benchmarks/results/2026-09-08-ollama-calibration.json`.
+
+## Amendment — 2026-09-10 · The morphology gap has a second suffix class, and a review mistook the rule for a defect
+
+Two more instances of the residual this record already names — *"the repository
+says `sync`, never `synchronized`"* — were observed during an external audit of
+the published 2.2.5 package, against a consumer repository:
+
+| Query term | What the repository writes | Why the probe misses it |
+| --- | --- | --- |
+| `globally` | `global` | `-ly` is derivational; `INFLECTIONS` covers `ing`, `ed`, `es`, `s` |
+| `resume` | `checkpoint` | not morphology at all — a synonym |
+
+The first is the same defect class as `synchronized` with a different suffix, and
+it is worth separating the two classes explicitly. `INFLECTIONS` bridges
+**inflection**. `-ly`, `-ion` and `-ance` are **derivation**, and no amount of
+adding endings to that list turns it into a stemmer. Whether this project wants a
+derivational stemmer, a small closed set of adverbial forms, or nothing at all is
+an open question and is recorded in `docs/deferred-work.md` rather than decided
+here.
+
+The second is not this rule's problem. A synonym is exactly what ADR-029's
+approved aliases exist for, and `RetrievalMemoryService#approve` implements it.
+The gap is reachability: nothing on the MCP surface can call it, so a consumer
+running `umbra mcp` has no way to teach the vocabulary the gate is asking them
+for. The abstention names the term and then offers no route to resolve it. That
+is recorded as a candidate too, in the shape of turning the abstention into a
+question rather than a refusal.
+
+### Recorded because the review reached the opposite conclusion
+
+The audit reported this rule as its first defect — *"the term gate is a hard AND,
+one absent word aborts the query"* — which is an accurate description of the
+mechanism and the wrong conclusion about it. The reasoning that makes it correct
+is already in this record's 2026-09-08 amendment: rank agreement measures
+consistency between two retrievers rather than evidence for the question, and the
+alternative of a tuned score threshold was rejected on evidence, because term
+presence is a property the index answers about itself with no constant to fit.
+
+Noting it here so the next review finds the answer in the record instead of
+rediscovering the mechanism and reading it as a bug. The measured cost of the
+rule — correct abstention 0% → 100% for false abstention 0% → 2.2% — is the part
+that makes it a trade rather than an oversight, and it is one paragraph above.

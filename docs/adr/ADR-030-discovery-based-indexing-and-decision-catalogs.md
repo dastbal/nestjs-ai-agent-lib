@@ -402,3 +402,121 @@ turning an interactive run into one permanent line per file.
 - `src/presentation/mcp/resource-catalog.ts` — `buildResourceCatalog`.
 - `src/core/config/workspace-scaffold.ts` — `ensureAgentStateIgnored`.
 - `README.md` — MCP and local workspace documentation.
+
+## Amendment — 2026-09-10 · The discovery scope is a decision; its consequence for the published graph tool is not recorded
+
+An external audit of the published 2.2.5 package reported the test-file exclusion
+as a defect. It is not: the rule is in this record's Decision, in
+*One read-only workspace discovery service*, and it is implemented as one shared
+predicate, `isIndexableSource` in `src/core/config/workspace-discovery.ts`.
+
+What the audit found that this record genuinely does not carry is the
+**consequence**. No row of `## Trade-offs` weighs including or excluding test
+files, and no item under `### Negative` names what follows for a tool this
+project has since published.
+
+### What follows, and why a consumer needs it stated
+
+A `.spec.ts` file is never enumerated, so it is never chunked, so it never
+becomes a `source` row in `dependency_graph`. `query_dependency_graph` with
+`direction: inbound` reads `WHERE target = ?`. Spec importers are therefore
+**structurally absent** rather than filtered at query time — the tool is not
+hiding them, it never knew about them.
+
+The tool answers *what breaks if I change this*. Tests are the first thing that
+breaks. So the answer comes back tidy, short, and quietly incomplete, which for a
+refactor is worse than a slow answer. Verified twice against `grep` on a consumer
+repository during the audit, both times finding a spec importer the tool omitted.
+
+The precedent for the fix is already in this project: ADR-031's `query_nest_graph`
+evaluation named the thirteen wiring shapes the tool can go blind to and declared
+two as limitations rather than pretending to cover them. The same treatment is
+owed here.
+
+### Three adjacent gaps in the same predicate, none of them decisions
+
+- **`__tests__` is not in `IGNORED_DIRECTORIES`.** A file at `__tests__/helper.ts`
+  carries no `.spec`/`.test` suffix, so it is indexed and does receive graph
+  edges. The scope rule and its implementation disagree for that layout.
+- **The suffix pattern anchors on `.ts` only.** `foo.spec.tsx` and `foo.test.tsx`
+  clear the extension gate and are indexed in full, while `foo.spec.ts` is
+  dropped. Whichever behaviour is intended, both cannot be.
+- **`resolveModulePath` never probes `.tsx`.** It tries the exact path, the path
+  plus `.ts`, and the path plus `/index.ts`. Discovery admits `.tsx` as
+  indexable source, so in any TSX repository an `import './Component'` that
+  resolves to `Component.tsx` produces **zero edges** and the importer vanishes
+  from the graph entirely. For a Next.js consumer this hole is larger than the
+  test one.
+
+### Four import forms the graph does not capture at all
+
+`extractDependencies` in `src/core/tools/ast/chunker.ts` keeps only specifiers
+that start with `.`, and visits only `ImportDeclaration` nodes. So tsconfig path
+aliases (`@/…`), dynamic `import()`, `require()`, and re-exports
+(`export * from`, `export { x } from`) contribute no edges. `import type` is
+captured, being an ordinary import declaration.
+
+None of that is wrong as an implementation choice; all of it is invisible to a
+consumer reading the tool's output as an answer about their code.
+
+### What this amendment does and does not change
+
+It changes nothing in the Decision. The scope rule may well be right, and this
+record is not the place to relitigate it — the proposal to index test files is
+recorded as a candidate in `docs/deferred-work.md`, in the sharper form David
+proposed: index the sentences in `it(...)` rather than the test code.
+
+What it adds is the consequence, so the next reader of `query_dependency_graph`
+output knows what the tool cannot see before trusting it for a demolition.
+
+### Verification evidence
+
+- Tarball/`dist` equality established first: `dastbal-umbra-2.2.5.tgz` extracted
+  and compared tree-wide against the local `dist/` at a clean tree — zero
+  differing files. The audited binary and the source read here are the same code.
+- Spec-importer omission: observed twice on a consumer repository, both against
+  `grep` as the reference.
+- The three predicate gaps and the four uncaptured import forms are read from
+  source, not observed at runtime, and are labelled accordingly.
+
+### Measured 2026-09-10 — the amendment above, with numbers
+
+`npm run bench:graph` rebuilds the dependency graph independently and diffs it
+against the table `query_dependency_graph` reads. On this repository, 276 source
+files of which 170 are indexed:
+
+| Construct | Total | In graph | Recall | Out of scope | Gap |
+| --- | --- | --- | --- | --- | --- |
+| `import` | 537 | 369 | 68.7% | 168 | **0** |
+| `export * from` | 48 | 0 | **0.0%** | 0 | **48** |
+| `import type` | 29 | 23 | 79.3% | 6 | **0** |
+| `export { x } from` | 7 | 2 | 28.6% | 0 | **5** |
+| `require` | 1 | 0 | 0.0% | 1 | 0 |
+| **edges** | **622** | **394** | **63.3%** | 175 | **53** |
+
+The distinction this record needed is in the last two columns. *Out of scope* is
+this decision working as written: the importing file is a spec, it has no chunks,
+it cannot be a `source` row. *Gap* is a construct the indexer walked past inside
+a file it did index.
+
+**The scope is not the problem; the re-exports are.** Ordinary imports inside an
+indexed file are captured perfectly — zero gap across 369 edges — so nothing here
+argues against the exclusion. All 53 genuine misses are re-exports, and
+`export * from` is missing at 48 of 48. `src/index.ts` is the published package's
+barrel and re-exports everything, so it carries **no outbound edges at all**:
+"what breaks if I change `factory.ts`" never names the entry point a consumer
+imports.
+
+Inbound, which is the question the tool is actually asked: **24 of 164 indexed
+files report every importer; 140 report an incomplete list.**
+
+Of the three adjacent gaps named above, only the suffix asymmetry is observable
+here. This tree holds no `.tsx` file, so `resolveModulePath`'s missing `.tsx`
+probe is unmeasurable rather than absent, and the repository declares no
+`compilerOptions.paths`. Both need a Next.js consumer to observe, and the runner
+reports them as `unmeasurable-here` rather than as passing.
+
+One correction to the amendment above: it lists dynamic `import()` among the
+uncaptured constructs, which is true of the indexer and irrelevant to this
+repository — there are **zero** such calls here. A grep suggests two; one is a
+`typeof import('fs')` type position and the other is inside a TSDoc comment.

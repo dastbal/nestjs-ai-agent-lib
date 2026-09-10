@@ -327,3 +327,57 @@ stream that omits them. Nothing in the gate itself changed.
 The lesson is narrower than "test more". A payload matching a consumer's expected
 shape proves the consumer *could* handle it. It says nothing about whether the
 message is ever delivered — and **delivery is where this defect lived.**
+
+## Amendment — 2026-09-10 · The skeleton shape this record deliberately did not change has a measured cost
+
+This record's `## Trade-offs actually evaluated` chose to fix the
+`[object Object]` rendering **in the tool** rather than in `NestChunker`, because
+`skeleton` is persisted as JSON in `file_registry.skeleton_signature` and injected
+into RAG context by `RetrieverService`: changing the chunker's return shape would
+change what is stored and retrieved for every indexed file. `generateSkeleton` is
+listed among the related files as *read, deliberately not changed*.
+
+That was the right call on blast radius. It also left a payload nobody had
+measured, and an external audit of the published 2.2.5 package measured it.
+
+### What it costs
+
+Across all 169 stored skeletons in this repository, 15,710 tokens total, 93 per
+file on average — so an answer carrying four files carries roughly 372 tokens of
+skeleton. Of that total, 14.2% is external package import statements, 42.5% is
+relative first-party imports, and the remaining 43.3% is the JSON envelope and
+the other skeleton fields.
+
+On a consumer repository whose single Zoho SDK import list runs to about sixty
+names, the same block reached 65% of one answer. The defect is
+repository-independent; its price is not, so a single percentage would mislead —
+it scales with how much the target repository imports from large external
+packages.
+
+The duplication is the sharper half. `NestChunker#extractClassContext` prepends
+every import declaration to each `class_signature` chunk, so the same statements
+travel twice in one answer: once as skeleton JSON, once inside the snippet. For
+`src/core/llm/provider.ts` that chunk is 289 tokens of which 136 — 47% — are the
+import block.
+
+### The asymmetry that says it is an omission
+
+Three lines above the skeleton block, `RetrieverService` renders the
+graph-derived import list capped at five entries and already filtered to
+first-party paths, because `extractDependencies` keeps only specifiers starting
+with `.`. The skeleton block immediately below is uncapped and unfiltered.
+`formatSkeleton` exists in `src/core/tools/analysis-tools.ts` and renders the
+same object readably; the retriever bypasses it and interpolates the raw JSON
+string.
+
+One function, two lists, opposite discipline. That is what distinguishes an
+omission from a design.
+
+### What this changes about the freeze
+
+Nothing. The persisted shape stays frozen for the reason this record gives, and
+this amendment does not reopen it. What it records is that **the freeze covers
+what is stored, not what is rendered**: the retriever's output can filter and cap
+what it emits without touching `skeleton_signature`, which is the cheap path and
+needs no reindex. Anything that changes `generateSkeleton` itself still carries
+the blast radius this record weighed.

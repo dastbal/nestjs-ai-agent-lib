@@ -133,8 +133,37 @@ export function findLexicalCandidates(
 
   const rows = db
     .prepare(
+      // One weight per column, including the UNINDEXED one, because that is how
+      // FTS5 assigns them: positionally, from column 0, with any missing
+      // trailing weight defaulting to 1.0. This used to read
+      // `bm25(code_chunks_fts, 8.0, 5.0, 1.0)`, which looks like three weights
+      // for the three indexed columns and is not — it landed 8.0 on `chunk_id`,
+      // where an unindexed column contributes nothing whatever its weight, 5.0
+      // on `file_path`, 1.0 on `metadata`, and the 1.0 default on `content`.
+      //
+      // The form below is **behaviourally identical** to that call, verified
+      // both on the calibration corpus and on a raw 40-row ordering. It is
+      // written out so nobody has to re-derive the offset to read the line.
+      //
+      // Do not "fix" it to `(0.0, 8.0, 5.0, 1.0)`. That is what the old call
+      // appeared to intend, and measured on the live calibration split through
+      // the control arm it is a regression: Hit@4 0.689 -> 0.644 and MRR
+      // 0.607 -> 0.537. Boosting `metadata` actively hurts, and the accident
+      // was better than the intent. `(0.0, 8.0, 1.0, 1.0)` measured marginally
+      // best at MRR 0.619, which is inside this corpus's resolution — one case
+      // is 2.2 points — so it is not a defensible change on that evidence.
+      //
+      // **CI will not stop that change.** Measured the same day: the fixture
+      // gate reports MRR 0.667 for those weights against 0.656 for these, so it
+      // calls the live regression a small improvement. The fixture holds 158
+      // chunks against ~1,000 and 15 positives against 45, and here it disagrees
+      // with the live corpus about the *direction* of a change rather than only
+      // its size — a sharper limit than ADR-031's warning that its numbers are
+      // not the live numbers. Re-weighting BM25 has to be measured with
+      // `npm run bench:fts-only`, which isolates lexical ranking with no
+      // embedding, and a green gate is not evidence either way.
       `SELECT chunk_id AS chunkId,
-              bm25(code_chunks_fts, 8.0, 5.0, 1.0) AS rank
+              bm25(code_chunks_fts, 0.0, 5.0, 1.0, 1.0) AS rank
          FROM code_chunks_fts
         WHERE code_chunks_fts MATCH ?
         ORDER BY rank

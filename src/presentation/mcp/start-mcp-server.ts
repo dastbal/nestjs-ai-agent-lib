@@ -1,13 +1,18 @@
 import { pinRuntimeRoot, runtimeRoot } from '../../core/config/runtime-root';
 import { setLogSink } from '../../core/observability/console-sink';
-import { probeEmbeddings } from '../../core/rag/embeddings/embeddings-availability';
+// Types only — erased at compile time, so they cost nothing at startup. The
+// implementations are loaded by `loadIndexingModules` below, after the
+// handshake. See its TSDoc for the measurement that moved them.
+type AvailabilityModule = typeof import('../../core/rag/embeddings/embeddings-availability');
+type ResolverModule = typeof import('../../core/rag/embeddings/embeddings-resolver');
+type IndexerModule = typeof import('../../core/rag/indexer');
 import {
-  pinEmbeddingsProvider,
-  resolveEmbeddings,
-} from '../../core/rag/embeddings/embeddings-resolver';
-import { formatIndexIntegrity, inspectIndexIntegrity } from '../../core/rag/index-integrity';
+  formatIndexIntegrity,
+  inspectIndexIntegrity,
+  inspectIndexServeability,
+} from '../../core/rag/index-integrity';
 import { readIndexStamp } from '../../core/rag/index-stamp';
-import { IndexerService } from '../../core/rag/indexer';
+// (the indexer's implementation is loaded lazily; see loadIndexingModules)
 import { withProvenance } from './dto-mapper';
 import { buildPromptCatalog } from './prompt-catalog';
 import {
@@ -19,6 +24,52 @@ import { buildResourceCatalog } from './resource-catalog';
 import { loadMcpSdk, McpServerLike } from './sdk-loader';
 import { buildSdkServer } from './sdk-server';
 import { buildToolCatalog, SemanticSearchReadiness } from './tool-catalog';
+
+/** The indexing and embedding modules, resolved once on first use. */
+interface IndexingModules {
+  readonly availability: AvailabilityModule;
+  readonly resolver: ResolverModule;
+  readonly indexer: IndexerModule;
+}
+
+let indexingModules: IndexingModules | undefined;
+
+/**
+ * Loads the indexing and embedding implementations, which a handshake never
+ * needs.
+ *
+ * Measured on this repository: `require`ing `indexer.js` costs **2,923 ms**, of
+ * which **2,492 ms** is `embeddings-resolver.js` pulling in the provider SDKs.
+ * All of it was paid at module load — before `server.connect`, and therefore
+ * inside the window a client's connect timeout measures. It was paid even under
+ * `--no-index`, where the indexer is never constructed at all.
+ *
+ * That matters because the ordering was already deliberate: the transport
+ * connects before provider probing and index work, so the handshake is not
+ * blocked by them. An eager import defeated that on its own, silently, from the
+ * import block.
+ *
+ * This is the reasoning `sdk-loader` already records for the SDK's HTTP stack —
+ * load only what is actually used, so a global server does not fail before its
+ * handshake. Every consumer of these symbols runs after the transport is
+ * connected: provider selection, the availability probe, the index run, and the
+ * status description a client asks for on demand.
+ *
+ * @returns The warm-up's dependencies, loaded on first call and reused after.
+ */
+function loadIndexingModules(): IndexingModules {
+  if (indexingModules !== undefined) return indexingModules;
+
+  /* eslint-disable @typescript-eslint/no-var-requires */
+  indexingModules = {
+    availability: require('../../core/rag/embeddings/embeddings-availability') as AvailabilityModule,
+    resolver: require('../../core/rag/embeddings/embeddings-resolver') as ResolverModule,
+    indexer: require('../../core/rag/indexer') as IndexerModule,
+  };
+  /* eslint-enable @typescript-eslint/no-var-requires */
+
+  return indexingModules;
+}
 
 /** Lifecycle stages visible while an MCP project root and index are warming. */
 type McpIndexPhase =
@@ -199,6 +250,12 @@ async function warmIndexInBackground(
   lifecycle.message = 'Checking the configured embedding provider.';
   lifecycle.startedAt = Date.now();
 
+  // First touch of the provider SDKs and the indexer, and the whole reason they
+  // are not in the import block. This runs after `server.connect`.
+  const { probeEmbeddings } = loadIndexingModules().availability;
+  const { pinEmbeddingsProvider, resolveEmbeddings } = loadIndexingModules().resolver;
+  const { IndexerService } = loadIndexingModules().indexer;
+
   try {
     const selection = resolveEmbeddings(options.embeddings);
     pinEmbeddingsProvider(selection.port.identity.provider);
@@ -273,10 +330,28 @@ function semanticSearchReadiness(
 
   const stamp = readIndexStamp(rootDir);
   if (stamp === undefined) return { ready: false, message: 'No durable index stamp exists yet.' };
-  const integrity = inspectIndexIntegrity(rootDir, { provider: stamp.provider, model: stamp.model });
-  return integrity.healthy
+
+  // Serveability, not integrity. This runs on every `ask_codebase` call, and the
+  // full inspection cost 202 ms of a 293 ms round trip to re-derive facts about
+  // the filesystem — while the search itself is 2 to 5 ms. The two conjuncts it
+  // drops answer *is the index current?*; this gate needs *can the index
+  // answer?*. A file edited since the last run used to refuse the question
+  // outright, in the middle of a refactor; it now answers, and the reply already
+  // carries `indexedAt` so the caller can judge the age. Completeness is still
+  // checked wherever it is asked for — `get_index_status`, `umbra doctor
+  // --index`, and the boot-time coverage check below all run the full report.
+  const serveability = inspectIndexServeability(rootDir, {
+    provider: stamp.provider,
+    model: stamp.model,
+  });
+  return serveability.serveable
     ? { ready: true, message: lifecycle.message }
-    : { ready: false, message: 'The vector coverage check is incomplete. Run umbra doctor --index.' };
+    : {
+      ready: false,
+      message:
+        `${serveability.reason ?? 'The index cannot serve a search.'} ` +
+        'Read get_index_status, or run umbra doctor --index.',
+    };
 }
 
 /** Tests persisted coverage without invoking an embedding provider. */
@@ -319,7 +394,9 @@ function describeIndexStatus(rootDir: string | undefined, lifecycle: McpIndexLif
 function decorateSemanticAnswer(rootDir: string | undefined, text: string): string {
   if (rootDir === undefined) return text;
   const current = readIndexStamp(rootDir);
-  const active = resolveEmbeddings().port.identity;
+  // Reached only once a search has been allowed, which means the warm-up has
+  // already loaded this module and the call is a memoized lookup.
+  const active = loadIndexingModules().resolver.resolveEmbeddings().port.identity;
   return withProvenance(text, {
     provider: current?.provider ?? active.provider,
     model: current?.model ?? active.model,

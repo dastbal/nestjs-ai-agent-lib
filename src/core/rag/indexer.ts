@@ -2,6 +2,7 @@ import { FileRegistry } from '../state/file-registry';
 import { NestChunker } from '../tools/ast/chunker';
 import { analyzeNestGraph } from '../tools/ast/nest-graph';
 import { backfillNestGraph, replaceNestGraphForFile } from './nest-graph-store';
+import { backfillDependencyGraph } from './dependency-graph-backfill';
 import { AgentDB } from '../state/db';
 import { runtimeRoot } from '../config/runtime-root';
 import {
@@ -235,6 +236,23 @@ export class IndexerService {
         (absolutePath) => fs.readFileSync(absolutePath, "utf-8"),
       );
       if (nestFiles > 0) IndexerService.log(`🧩 Read NestJS wiring from ${nestFiles} files.`);
+
+      // Dependency edges are derived from source too, and the same blind spot
+      // applies for a different reason: when the extractor learns to see a
+      // construct it used to walk past, no file changed, so nothing
+      // re-processes and the graph stays incomplete on an up-to-date index.
+      // Keyed by extractor generation rather than by content hash for exactly
+      // that reason. Costs an AST parse per file and no embeddings.
+      const edgeFiles = backfillDependencyGraph(
+        this.db,
+        discovery.sourceFiles,
+        (relativePath: string, source: string) =>
+          this.chunker.analyze(relativePath, source, 'backfill').dependencies,
+        (absolutePath: string) => fs.readFileSync(absolutePath, 'utf-8'),
+      );
+      if (edgeFiles > 0) {
+        IndexerService.log(`🕸️ Re-read dependency edges from ${edgeFiles} files.`);
+      }
     } catch (error: unknown) {
       const diagnostic = error instanceof Error ? error.message : String(error);
       writeIndexStamp(rootDir, identity, {
