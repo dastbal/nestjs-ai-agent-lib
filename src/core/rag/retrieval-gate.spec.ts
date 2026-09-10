@@ -68,6 +68,21 @@ interface Fixture {
   readonly queries: { readonly id: string; readonly vector: number }[];
 }
 
+/**
+ * Floor for mean reciprocal rank on the fixture. Measured 0.656 on 2026-09-10.
+ *
+ * It exists because Hit@4 is blind to the right file sliding from rank one to
+ * rank four: a change can hold every other assertion here and still make every
+ * answer worse to read.
+ *
+ * **It is not a guard against a BM25 re-weighting**, and the attempt to make it
+ * one is what established the limit recorded below. A weight vector that cost
+ * the live corpus 0.070 of MRR gained 0.011 here, so this fixture called a
+ * measured regression a small improvement. Ranking changes belong to
+ * `npm run bench:fts-only`.
+ */
+const MRR_FLOOR = 0.55;
+
 const fixtureDir = path.resolve(__dirname, '..', '..', '..', 'docs/benchmarks/fixture');
 const fixture: Fixture = JSON.parse(
   fs.readFileSync(path.join(fixtureDir, 'retrieval-fixture.json'), 'utf8'),
@@ -206,6 +221,7 @@ describe('retrieval quality gate', () => {
     // breaks leaves nobody able to see a number drifting towards its floor.
     process.stdout.write(
       `\nretrieval gate — hit ${summary.hitRate?.toFixed(3)} · ` +
+        `mrr ${summary.mrr?.toFixed(3)} · ` +
         `false abstention ${summary.falseAbstentionRate?.toFixed(3)} · ` +
         `correct abstention ${summary.correctAbstentionRate?.toFixed(3)} · ` +
         `${summary.positives}+${summary.negatives} cases\n`,
@@ -215,6 +231,13 @@ describe('retrieval quality gate', () => {
     // correct abstention 1.0. Floors sit below with room for a tie-break.
     expect(summary.hitRate).toBeGreaterThanOrEqual(0.75);
     expect(summary.falseAbstentionRate).toBeLessThanOrEqual(0.2);
+
+    // MRR has its own floor because Hit@4 cannot see a ranking regression that
+    // keeps the right file inside the window and pushes it down. What it does
+    // *not* cover is documented on the constant: this fixture scored a measured
+    // live regression as an improvement, so a green run here is not evidence
+    // about ranking.
+    expect(summary.mrr).toBeGreaterThanOrEqual(MRR_FLOOR);
 
     // No floor: the policy either abstains on a feature this repository does
     // not have or it does not, and 9 of 10 would mean it regressed.

@@ -96,6 +96,9 @@ for (const [label, target] of [
 }
 
 const compiled = (relative) => import(pathToFileURL(path.join(repoRoot, 'dist', relative)).href);
+const { inspectIndexIntegrity, formatIndexIntegrity } = await compiled(
+  'core/rag/index-integrity.js',
+);
 const { findLexicalCandidates, hasExactLexicalEvidence } = await compiled(
   'core/rag/lexical-index.js',
 );
@@ -111,6 +114,23 @@ const corpus = JSON.parse(fs.readFileSync(corpusPath, 'utf8'));
 const cases = corpus.queries.filter((item) => split === 'all' || item.split === split);
 if (cases.length === 0) {
   console.error('Benchmark blocked: corpus has no cases in split ' + split + '.');
+  process.exit(2);
+}
+
+// The hybrid runner refuses to score an index the integrity check calls
+// unhealthy, and this arm used to read one happily — which is how it scored a
+// stale index after a source edit, in the session that added this. `indexSize`
+// below catches a file appearing or disappearing; it cannot see a file whose
+// *content* changed, because the counts do not move. The integrity report can:
+// it hashes every discovered file and lists the stale ones.
+const integrity = inspectIndexIntegrity(root, undefined);
+if (!integrity.healthy) {
+  console.error(
+    'Benchmark blocked: the index is not in a scoreable state, so any number ' +
+      'from it would describe a mixture of two code states.\n',
+  );
+  console.error(formatIndexIntegrity(integrity));
+  console.error('\nRun `umbra mcp --root ' + root + '` once to let it heal, or `umbra doctor --index`.');
   process.exit(2);
 }
 

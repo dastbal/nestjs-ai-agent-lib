@@ -112,6 +112,14 @@ benchmark run is not a measurement of a commit alone**; it is a measurement of a
 commit against an index. Adding the module you are about to benchmark is enough
 to invalidate the comparison you are running it for.
 
+`indexSize` is necessary and not sufficient: it moves when a file appears or
+disappears, and it does not move when a file's **content** changes. Editing a
+source file leaves the counts identical while its chunks, its FTS rows and its
+vectors all go stale — including the comments, which are indexed like any other
+text. Both runners refuse in that state rather than scoring a mixture of two code
+states, which is what the integrity preflight and its stale-path list are for.
+Reindex, then benchmark; the run that refuses has told you something.
+
 ## The control arm, and the one comparison it does not support
 
 `npm run bench:fts-only` writes a second kind of report here, named the same way
