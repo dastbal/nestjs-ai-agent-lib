@@ -1609,7 +1609,7 @@ told so.
 > **Implemented 2026-09-10**, and not the way this entry planned it. The answer
 > turned out not to be the stamp: it was noticing that two of the eleven
 > conjuncts answer *is the index current?* while the gate needs *can the index
-> answer?*.  drops those two, 401 ms became 52 ms, and
+> answer?*. `inspectIndexServeability` drops those two, 401 ms became 52 ms, and
 > an edited file no longer refuses the question. Recorded as ADR-024 amendment
 > 16. Kept rather than deleted because the hazard analysis below is what the
 > implementation had to satisfy, and because the step it names first — establish
