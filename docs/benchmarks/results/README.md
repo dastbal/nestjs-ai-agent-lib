@@ -79,8 +79,38 @@ Check, in this order, before believing a difference:
    rate on its own.
 3. Same `negativeHealth.provable`. A rotted negative raises the correct
    abstention rate for free.
-4. Then, and only then, the difference is about retrieval — and `commit` tells
+4. **Same index size** — `indexSize` in a control-arm report, the `files:` and
+   `chunks:` lines of `indexStatus` in a hybrid one. See below; this check was
+   added after it was needed.
+5. Then, and only then, the difference is about retrieval — and `commit` tells
    you which change to credit.
+
+### Why the index size is its own check
+
+Check 2 does not cover it, and the gap is easy to walk into: a **new source file
+that is not an expected path** leaves `reachableHitCeiling` at 1.0 and still
+moves the numbers. BM25 is corpus-relative, so one added document shifts IDF and
+every candidate rank behind it, and a shifted rank changes the fused score.
+
+Measured on this repository the day the check was added, by committing a single
+new module and re-running with no other change:
+
+```
+169 files, 1022 chunks   fts-only policy   hit 0.667   mrr 0.585
+170 files, 1029 chunks   fts-only policy   hit 0.644   mrr 0.574
+```
+
+One file, 2.2 points, and one case flipped out of grounded — which shows up as a
+false abstention rather than a bad rank. That was reproduced on the control arm
+specifically because it has no embedding and no rendering: the only variable left
+was the index.
+
+Two consequences worth keeping in mind. **Retrieval is deterministic** — two runs
+at the same commit over the same index returned byte-identical outcomes for all
+55 cases, so a difference is never noise and always has a cause. And **a
+benchmark run is not a measurement of a commit alone**; it is a measurement of a
+commit against an index. Adding the module you are about to benchmark is enough
+to invalidate the comparison you are running it for.
 
 ## The control arm, and the one comparison it does not support
 

@@ -143,6 +143,18 @@ const indexedPaths = db
   .map((row) => toPosix(row.file_path));
 const coverage = assessCorpusCoverage(cases, indexedPaths);
 
+// Recorded because the coverage preflight cannot stand in for it. Adding one
+// source file that is not an expected path leaves `reachableHitCeiling` at 1.0
+// and still moves the result: BM25 is corpus-relative, so a new document shifts
+// IDF and every candidate rank behind it. Measured on this repository, going
+// from 169 to 170 indexed files moved this arm's `policy` hit rate 0.667 to
+// 0.644 and flipped one case out of grounded. Two reports are comparable only
+// when these two numbers match.
+const indexSize = {
+  files: indexedPaths.length,
+  chunks: db.prepare('SELECT COUNT(*) AS total FROM code_chunks').get().total,
+};
+
 const outcomes = { policy: [], ranking: [] };
 const trace = [];
 
@@ -252,6 +264,7 @@ const report = {
   dirtyWorkingTree: code.dirty,
   root,
   latencyExcludes: ['mcp transport', 'readiness gate', 'query embedding'],
+  indexSize,
   coverage,
   summaries: { policy: summarizeRun(outcomes.policy), ranking: summarizeRun(outcomes.ranking) },
   trace,
@@ -273,6 +286,7 @@ console.log(
   'index covers ' + coverage.coveredPaths + '/' + coverage.expectedPaths + ' expected paths - ' +
     'reachable hit ceiling ' + (coverage.reachableHitCeiling * 100).toFixed(0) + '%',
 );
+console.log('index size ' + indexSize.files + ' files, ' + indexSize.chunks + ' chunks');
 for (const [arm, summary] of Object.entries(report.summaries)) {
   const row = summary.find((entry) => entry.split === split) ?? summary[0];
   const correct = row.correctAbstentionRate;

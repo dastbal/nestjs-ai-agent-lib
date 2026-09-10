@@ -1,0 +1,881 @@
+{
+  "corpusVersion": 5,
+  "split": "calibration",
+  "ranAt": "2026-09-10T15:25:04.605Z",
+  "commit": "1692cfa",
+  "dirtyWorkingTree": false,
+  "root": "C:\\Users\\BLUELABEL-PROGRAMMER\\Documents\\london\\London\\nestjs-ai-agent-lib",
+  "providers": [
+    {
+      "provider": "ollama",
+      "cases": 55,
+      "indexStatus": "state:         ready\nmessage:       Serving existing durable vector coverage; automatic warm-up was skipped.\nroot:          C:\\Users\\BLUELABEL-PROGRAMMER\\Documents\\london\\London\\nestjs-ai-agent-lib\nstarted at:    2026-09-10T15:25:18.144Z\nprovider:      ollama\nmodel:         nomic-embed-text\nstamp status:  complete\nfiles indexed: 170\n\ndatabase:       C:\\Users\\BLUELABEL-PROGRAMMER\\Documents\\london\\London\\nestjs-ai-agent-lib\\.umbra\\memory.db\nschema:         valid\ndiscovery:      170 source files\nfiles:          170 (170 indexed, 0 skipped)\nchunks:         1029\nmissing vectors: 0\nstamp:          consistent\nlease:          idle\nhealth:         healthy\nselected:       ollama/nomic-embed-text\nvectors:        ollama/nomic-embed-text · 1029 × 768d\nvectors:        vertex/text-embedding-004 · 728 × 768d",
+      "coverage": {
+        "expectedPaths": 43,
+        "coveredPaths": 43,
+        "missingPaths": [],
+        "unreachableCases": [],
+        "reachableHitCeiling": 1
+      },
+      "negativeHealth": {
+        "negatives": 10,
+        "provable": 10,
+        "rotted": [],
+        "knownHard": []
+      },
+      "summaries": [
+        {
+          "split": "calibration",
+          "positives": 45,
+          "negatives": 10,
+          "hitRate": 0.8666666666666667,
+          "mrr": 0.687037037037037,
+          "falseAbstentionRate": 0.022222222222222223,
+          "correctAbstentionRate": 1,
+          "medianLatencyMs": 265.5620999999992,
+          "p95LatencyMs": 302.8097999999991
+        },
+        {
+          "split": "all",
+          "positives": 45,
+          "negatives": 10,
+          "hitRate": 0.8666666666666667,
+          "mrr": 0.687037037037037,
+          "falseAbstentionRate": 0.022222222222222223,
+          "correctAbstentionRate": 1,
+          "medianLatencyMs": 265.5620999999992,
+          "p95LatencyMs": 302.8097999999991
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "provider-resolution",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/embeddings/embeddings.port.ts",
+            "src/core/rag/embeddings/embeddings-resolver.ts",
+            "src/bin/cli.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.5,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 989.5099000000009
+        },
+        {
+          "id": "embedding-default",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/embeddings/embeddings-resolver.ts",
+            "src/core/rag/embeddings/ollama-embeddings.adapter.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 270.2577999999994
+        },
+        {
+          "id": "embedding-config",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/config/agent-config.ts",
+            "src/bin/cli.ts",
+            "src/core/rag/embeddings/embeddings-resolver.ts",
+            "src/core/llm/provider.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 293.10819999999876
+        },
+        {
+          "id": "embedding-identity",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/embeddings/embeddings.port.ts",
+            "src/core/state/db.ts",
+            "src/core/rag/unknown-terms.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 269.2722999999969
+        },
+        {
+          "id": "embedding-availability",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/embeddings/embeddings-resolver.ts",
+            "src/core/rag/embeddings/embeddings.port.ts",
+            "src/core/rag/embeddings/embeddings-availability.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.3333333333333333,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 293.98899999999776
+        },
+        {
+          "id": "ollama-embedding-adapter",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/embeddings/ollama-embeddings.adapter.ts",
+            "src/core/rag/embeddings/vertex-embeddings.adapter.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 255.08729999999923
+        },
+        {
+          "id": "vertex-embedding-adapter",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/embeddings/vertex-embeddings.adapter.ts",
+            "src/core/rag/embeddings/embeddings-resolver.ts",
+            "src/core/rag/embeddings/ollama-embeddings.adapter.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 255.3822
+        },
+        {
+          "id": "provider-backfill",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/indexer.ts",
+            "src/core/rag/retriever.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 284.6170999999995
+        },
+        {
+          "id": "index-stamp",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/index-stamp.ts",
+            "src/presentation/mcp/resource-catalog.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 252.14709999999832
+        },
+        {
+          "id": "semantic-retriever",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/hybrid-ranking.ts",
+            "src/core/rag/retriever.ts",
+            "src/core/rag/retrieval-metrics.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.5,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 275.574099999998
+        },
+        {
+          "id": "lexical-index",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [],
+          "abstained": true,
+          "hit": 0,
+          "reciprocalRank": 0,
+          "falseAbstention": true,
+          "falsePositive": false,
+          "elapsedMs": 249.34530000000086
+        },
+        {
+          "id": "hybrid-ranking",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/hybrid-ranking.ts",
+            "src/core/rag/lexical-index.ts",
+            "src/core/rag/retriever.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 316.43719999999666
+        },
+        {
+          "id": "abstention-report",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/agent/evidence-protocol.ts",
+            "src/core/rag/unknown-terms.ts"
+          ],
+          "abstained": false,
+          "hit": 0,
+          "reciprocalRank": 0,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 259.0535000000018
+        },
+        {
+          "id": "vector-codec",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/vector-codec.ts",
+            "src/core/rag/retriever.ts",
+            "src/core/rag/indexer.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 277.96459999999934
+        },
+        {
+          "id": "vector-storage",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/lexical-index.ts",
+            "src/core/state/db.ts",
+            "src/core/rag/indexer.ts",
+            "src/core/rag/index-integrity.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.5,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 286.1951999999983
+        },
+        {
+          "id": "sqlite-vector-extension",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/state/vector-extension.ts",
+            "src/core/rag/retriever.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 268.0601999999999
+        },
+        {
+          "id": "file-registry",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/indexer.ts",
+            "src/core/state/db.ts"
+          ],
+          "abstained": false,
+          "hit": 0,
+          "reciprocalRank": 0,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 255.4461999999985
+        },
+        {
+          "id": "chunker",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/tools/ast/chunker.ts",
+            "src/core/types.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 257.8568000000014
+        },
+        {
+          "id": "cosine-math",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/retriever.ts"
+          ],
+          "abstained": false,
+          "hit": 0,
+          "reciprocalRank": 0,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 288.35819999999876
+        },
+        {
+          "id": "rag-tool",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/subagents/researcher.subagent.ts",
+            "src/presentation/mcp/tool-catalog.ts",
+            "src/core/tools/rag-tools.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.3333333333333333,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 276.2716999999975
+        },
+        {
+          "id": "mcp-provider-pin",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/embeddings/embeddings-resolver.ts",
+            "src/presentation/mcp/start-mcp-server.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.5,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 284.78949999999895
+        },
+        {
+          "id": "mcp-tool-catalog",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/presentation/mcp/tool-catalog.ts",
+            "src/presentation/mcp/sdk-server.ts",
+            "src/presentation/mcp/start-mcp-server.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 265.5620999999992
+        },
+        {
+          "id": "mcp-dto",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/presentation/mcp/dto-mapper.ts",
+            "src/presentation/mcp/mcp.contracts.ts",
+            "src/presentation/mcp/start-mcp-server.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 285.1093000000001
+        },
+        {
+          "id": "mcp-sdk-server",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/presentation/mcp/sdk-loader.ts",
+            "src/presentation/mcp/index.ts",
+            "src/presentation/mcp/sdk-server.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.3333333333333333,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 263.4334000000017
+        },
+        {
+          "id": "mcp-sdk-loader",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/presentation/mcp/sdk-loader.ts",
+            "src/presentation/mcp/start-mcp-server.ts",
+            "src/presentation/mcp/index.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 273.41259999999966
+        },
+        {
+          "id": "mcp-contracts",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/presentation/mcp/mcp.contracts.ts",
+            "src/presentation/mcp/index.ts",
+            "src/presentation/mcp/dto-mapper.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 272.8410999999978
+        },
+        {
+          "id": "mcp-prompts",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/presentation/mcp/prompt-catalog.ts",
+            "src/presentation/mcp/mcp.contracts.ts",
+            "src/presentation/mcp/start-mcp-server.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 253.8171000000002
+        },
+        {
+          "id": "mcp-resources",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/presentation/mcp/resource-catalog.ts",
+            "src/presentation/mcp/prompt-catalog.ts",
+            "src/presentation/mcp/dto-mapper.ts",
+            "src/presentation/mcp/tool-catalog.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 255.54399999999805
+        },
+        {
+          "id": "runtime-root",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/presentation/mcp/project-root.ts",
+            "src/core/config/runtime-root.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.5,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 236.7713999999978
+        },
+        {
+          "id": "agent-directory",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/config/agent-directory.ts",
+            "src/presentation/mcp/project-root.ts",
+            "src/core/config/workspace-scaffold.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 269.29160000000047
+        },
+        {
+          "id": "workspace-scaffold",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/config/agent-directory.ts",
+            "src/core/config/workspace-scaffold.ts",
+            "src/core/observability/langsmith-config.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.5,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 284.67249999999694
+        },
+        {
+          "id": "mcp-config",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/presentation/mcp/prompt-catalog.ts",
+            "src/core/config/mcp-config.ts",
+            "src/presentation/mcp/tool-catalog.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.5,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 280.8850999999995
+        },
+        {
+          "id": "agent-kernel",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/agent/agent-kernel.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 246.22609999999986
+        },
+        {
+          "id": "evidence-protocol",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/agent/evidence-protocol.ts",
+            "src/core/agent/deep-agent-factory.ts",
+            "src/core/agent/contracts.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 236.90780000000086
+        },
+        {
+          "id": "context-compression",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/presentation/cli/chat-session.ts",
+            "src/core/agent/context-compressor.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.5,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 254.49479999999676
+        },
+        {
+          "id": "turn-budget",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/presentation/cli/stream-renderer.ts",
+            "src/core/agent/deep-agent-factory.ts",
+            "src/core/agent/turn-governor.ts",
+            "src/presentation/cli/chat-session.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.3333333333333333,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 259.1180999999997
+        },
+        {
+          "id": "security-policy",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/tools/utils/authorize.ts",
+            "src/core/tools/system-tools.ts",
+            "src/core/config/workspace-discovery.ts",
+            "src/core/security/agent-security-policy.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.25,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 302.8097999999991
+        },
+        {
+          "id": "pricing",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/infrastructure/config/default-pricing.ts",
+            "src/presentation/cli/chat-session.ts",
+            "src/core/infrastructure/config/default-context-windows.ts",
+            "src/core/agent/deep-agent-factory.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 267.6209999999992
+        },
+        {
+          "id": "ollama-chat",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/embeddings/ollama-embeddings.adapter.ts",
+            "src/core/llm/provider.ts",
+            "src/core/llm/ollama-adapter.ts",
+            "src/core/llm/vertex-chat-adapter.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 0.3333333333333333,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 251.9998999999989
+        },
+        {
+          "id": "vertex-provider",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/rag/embeddings/vertex-embeddings.adapter.ts",
+            "src/core/rag/embeddings/ollama-embeddings.adapter.ts",
+            "src/core/rag/embeddings/embeddings-resolver.ts"
+          ],
+          "abstained": false,
+          "hit": 0,
+          "reciprocalRank": 0,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 271.24489999999787
+        },
+        {
+          "id": "console-sink",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/observability/console-sink.ts",
+            "src/core/tools/utils/logger.ts",
+            "src/presentation/mcp/sdk-server.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 265.6447999999982
+        },
+        {
+          "id": "chunk-types",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/tools/ast/chunker.ts",
+            "src/core/rag/retriever.ts"
+          ],
+          "abstained": false,
+          "hit": 0,
+          "reciprocalRank": 0,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 274.84560000000056
+        },
+        {
+          "id": "dependency-tool",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/tools/analysis-tools.ts",
+            "src/presentation/mcp/tool-catalog.ts",
+            "src/core/rag/retriever.ts",
+            "src/core/tools/nest-graph-tools.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 285.21450000000186
+        },
+        {
+          "id": "integrity-tool",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/tools/testing-tools.ts",
+            "src/core/subagents/coder.subagent.ts",
+            "src/presentation/mcp/tool-catalog.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 286.32450000000244
+        },
+        {
+          "id": "adr-index-tool",
+          "split": "calibration",
+          "expectation": "path",
+          "returnedPaths": [
+            "src/core/tools/adr-index.ts",
+            "src/core/tools/system-tools.ts"
+          ],
+          "abstained": false,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 247.07070000000022
+        },
+        {
+          "id": "negative-prometheus",
+          "split": "calibration",
+          "expectation": "abstain",
+          "returnedPaths": [],
+          "abstained": true,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 168.54069999999774
+        },
+        {
+          "id": "negative-graphql",
+          "split": "calibration",
+          "expectation": "abstain",
+          "returnedPaths": [],
+          "abstained": true,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 135.77750000000015
+        },
+        {
+          "id": "negative-marketplace",
+          "split": "calibration",
+          "expectation": "abstain",
+          "returnedPaths": [],
+          "abstained": true,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 148.67929999999978
+        },
+        {
+          "id": "negative-multitenant",
+          "split": "calibration",
+          "expectation": "abstain",
+          "returnedPaths": [],
+          "abstained": true,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 194.0625
+        },
+        {
+          "id": "negative-rebase",
+          "split": "calibration",
+          "expectation": "abstain",
+          "returnedPaths": [],
+          "abstained": true,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 203.10410000000047
+        },
+        {
+          "id": "negative-transcription",
+          "split": "calibration",
+          "expectation": "abstain",
+          "returnedPaths": [],
+          "abstained": true,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 187.19220000000132
+        },
+        {
+          "id": "negative-mongodb",
+          "split": "calibration",
+          "expectation": "abstain",
+          "returnedPaths": [],
+          "abstained": true,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 156.76150000000052
+        },
+        {
+          "id": "negative-kafka",
+          "split": "calibration",
+          "expectation": "abstain",
+          "returnedPaths": [],
+          "abstained": true,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 153.3726999999999
+        },
+        {
+          "id": "negative-grafana",
+          "split": "calibration",
+          "expectation": "abstain",
+          "returnedPaths": [],
+          "abstained": true,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 162.23939999999857
+        },
+        {
+          "id": "negative-terraform",
+          "split": "calibration",
+          "expectation": "abstain",
+          "returnedPaths": [],
+          "abstained": true,
+          "hit": 1,
+          "reciprocalRank": 1,
+          "falseAbstention": false,
+          "falsePositive": false,
+          "elapsedMs": 155.93599999999788
+        }
+      ]
+    }
+  ]
+}

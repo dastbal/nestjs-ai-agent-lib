@@ -168,10 +168,20 @@ healthy. It needs no server and no provider.
 
 ## Current limitations and follow-up metric
 
-**The corpus is 45 positives.** One case is 2.2 points. Every difference smaller
-than about three points in this report is inside the resolution of the
-instrument, and the 20-point control-arm gap is the only one comfortably outside
-it.
+**The corpus is 45 positives, and the instrument is more fragile than that
+sounds.** One case is 2.2 points. Worse, one *added source file* is also 2.2
+points: committing a single new module and re-running with no other change moved
+the control arm from 0.667 to 0.644 and flipped one case out of grounded, because
+BM25 is corpus-relative and a new document shifts every candidate rank behind it.
+So every difference smaller than about three points in this report is inside the
+resolution of the instrument, and the 20-point control-arm gap is the only one
+comfortably outside it.
+
+That is not noise, though. Two runs at the same commit over the same index
+returned byte-identical outcomes for all 55 cases, so a difference always has a
+cause — it is just as likely to be the index as the code. The comparison protocol
+in `docs/benchmarks/results/README.md` gained a fourth check for exactly this,
+after this report's own measurements walked into it.
 
 **Latency was decomposed by isolation, not by instrumentation.** The stages were
 timed individually against the same index; nothing traced a single real request
